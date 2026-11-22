@@ -28,15 +28,19 @@ The four operations are independent: registering never implies reviewing, and
 analysis never rewrites records. Each operation is a YAML workflow in
 [`workflows/`](workflows/).
 
-![Four operations: Sync, Register, Review, and Analyze, with their outputs](docs/img/four-operations.png)
+## Demo
+
+[![Trading Record concept demo (28 s, silent, Traditional Chinese)](docs/media/demo-zh-TW.gif)](docs/media/demo-zh-TW.mp4)
+
+28-second silent concept demo (Traditional Chinese) of the four operations. Click it for the full-quality MP4. It uses fictional interface data and makes no performance claims.
 
 ## Architecture
 
-![Architecture from YAML workflows through the public engine to canonical records, evidence, and exports; personal data stays out of the repository](docs/img/architecture.png)
+YAML workflows drive the public engine, which writes canonical records, content-addressed evidence and generated exports. Personal data stays out of the repository.
 
 ## Open-source model
 
-![One-way sanitized export from a private repository to the public engine repository; real trading data is not exported](docs/img/open-source-model.png)
+The engine is exported one way from a private repository, sanitized and leak-scanned. Real trading data is never exported.
 
 ## Design principles
 

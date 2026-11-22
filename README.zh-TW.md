@@ -15,15 +15,19 @@ traderecord 為每筆交易保留一份不可悄悄改寫的紀錄：發生了�
 | **Review** | 對單筆已登錄交易做獨立檢討，只保存 Owner 確認的結論。 |
 | **Analyze** | 描述性統計，以及明確要求時的跨交易診斷。 |
 
-![Four operations: Sync, Register, Review, and Analyze, with their outputs](docs/img/four-operations.png)
+## 示範影片
+
+[![Trading Record 概念示範（28 秒，無聲，繁體中文）](docs/media/demo-zh-TW.gif)](docs/media/demo-zh-TW.mp4)
+
+28 秒無聲概念示範，介紹四個操作。點擊可看完整畫質 MP4。使用虛構介面資料，不含任何績效宣稱。
 
 ## 架構
 
-![Architecture from YAML workflows through the public engine to canonical records, evidence, and exports; personal data stays out of the repository](docs/img/architecture.png)
+YAML 工作流程驅動公開引擎，產生正式紀錄、內容定址證據與衍生匯出。個人資料不會進入此儲存庫。
 
 ## 開源模式
 
-![One-way sanitized export from a private repository to the public engine repository; real trading data is not exported](docs/img/open-source-model.png)
+引擎由私有儲存庫單向匯出，經去識別化與洩漏掃描；真實交易資料不會被匯出。
 
 ## 設計原則
 
