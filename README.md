@@ -9,8 +9,10 @@ you maintain it without ever being the authority on what is true.
 
 > **Status: early public release (v0.1).** The engine was extracted from a private
 > repository that has run a real trading record for months. This public edition
-> ships without any real trade data, so part of the original test suite and the
-> demo corpus are not included yet (see [Roadmap](#roadmap)). Expect rough edges
+> ships without any real trade data. It carries a small synthetic baseline
+> ([`examples/`](examples/)) so most of the test suite runs; the tests that need the
+> maintainer's private records are listed in [`private_only.json`](private_only.json)
+> (see [Roadmap](#roadmap)). Expect rough edges
 > and open an issue when you hit one.
 
 ## What it does
@@ -25,6 +27,16 @@ you maintain it without ever being the authority on what is true.
 The four operations are independent: registering never implies reviewing, and
 analysis never rewrites records. Each operation is a YAML workflow in
 [`workflows/`](workflows/).
+
+![Four operations: Sync, Register, Review, and Analyze, with their outputs](docs/img/four-operations.png)
+
+## Architecture
+
+![Architecture from YAML workflows through the public engine to canonical records, evidence, and exports; personal data stays out of the repository](docs/img/architecture.png)
+
+## Open-source model
+
+![One-way sanitized export from a private repository to the public engine repository; real trading data is not exported](docs/img/open-source-model.png)
 
 ## Design principles
 
@@ -56,8 +68,8 @@ placeholder rules). Replace them with your own strategy definitions.
 
 ## Roadmap
 
-- [ ] A synthetic demo corpus so the full register, review and analyze flow runs end to end.
-- [ ] Restore the remaining tests that depend on a populated record, using synthetic fixtures.
+- [x] A synthetic baseline (12 invented trades, fake pins) so the register, review and analyze flow and most tests run. Regenerate with `python examples/make_synthetic_baseline.py`.
+- [ ] Synthetic equivalents for the 24 test files and 53 single tests still listed in `private_only.json` (they cover the one-time legacy migration and private-adapter paths).
 - [ ] Installable package (`pip install traderecord`); today the engine runs from a checkout.
 - [ ] More provider adapters (contributions welcome).
 

@@ -1,0 +1,22 @@
+{
+  "artifacts": {
+    "dataset": {
+      "path": "exports/method-validation/b1-v3/canonical-trade-dataset.jsonl",
+      "sha256": "09d7d5c7f4d42452267cbe23059f1baf7bba16357088a2b093cd457dfe74153b"
+    },
+    "episode_resolution": {
+      "path": "canonical/adjudications/method-validation/episode-identity-resolution-20260911.jsonl",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "baseline_sha": "0000000000000000000000000000000000000000",
+  "counts": {
+    "performance_countable_episode_count": 12,
+    "source_rows": 12
+  },
+  "dataset_version": "method-validation-b1.v3",
+  "generated_at": "2026-09-11T00:00:00Z",
+  "manifest_digest": "0fee140ab928495c72f73f4b3dc3f64e0ebbed0e0c7298b7063906e3fc609d1e",
+  "schema_version": "method-validation-b1.v3",
+  "synthetic": true
+}

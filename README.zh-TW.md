@@ -4,7 +4,7 @@
 
 traderecord 為每筆交易保留一份不可悄悄改寫的紀錄：發生了什麼、當時為什麼進場、圖表證據，以及事後的獨立檢討。AI Agent 可以協助維護，但永遠不是「什麼是真的」的權威。
 
-> **狀態：早期公開版（v0.1）。** 引擎取自一個已實際運作數月的私有 repo。公開版不含任何真實交易資料，因此部分原始測試與示範資料尚未納入（見下方路線圖）。
+> **狀態：早期公開版（v0.1）。** 引擎取自一個已實際運作數月的私有 repo。公開版不含任何真實交易資料，但附有一份小型合成基準資料（[`examples/`](examples/)），多數測試可直接執行；需要維護者私有紀錄的測試列在 [`private_only.json`](private_only.json)（見下方路線圖）。
 
 ## 四個獨立操作
 
@@ -14,6 +14,16 @@ traderecord 為每筆交易保留一份不可悄悄改寫的紀錄：發生了�
 | **Register** | 經 Owner 確認事實、理由與圖表證據後，才建立交易紀錄。 |
 | **Review** | 對單筆已登錄交易做獨立檢討，只保存 Owner 確認的結論。 |
 | **Analyze** | 描述性統計，以及明確要求時的跨交易診斷。 |
+
+![Four operations: Sync, Register, Review, and Analyze, with their outputs](docs/img/four-operations.png)
+
+## 架構
+
+![Architecture from YAML workflows through the public engine to canonical records, evidence, and exports; personal data stays out of the repository](docs/img/architecture.png)
+
+## 開源模式
+
+![One-way sanitized export from a private repository to the public engine repository; real trading data is not exported](docs/img/open-source-model.png)
 
 ## 設計原則
 
@@ -39,8 +49,8 @@ python -m trading_os --help
 
 ## 路線圖
 
-- 合成示範資料，讓 register、review、analyze 能完整跑通。
-- 用合成 fixture 還原依賴既有紀錄的其餘測試。
+- [x] 合成基準資料（12 筆虛構交易），讓 register、review、analyze 與多數測試可執行；以 `python examples/make_synthetic_baseline.py` 重新產生。
+- [ ] 為 `private_only.json` 中仍未涵蓋的測試（一次性舊資料遷移、私有 adapter）補合成對應版本。
 - 可 `pip install` 的套件。
 
 ## 免責聲明

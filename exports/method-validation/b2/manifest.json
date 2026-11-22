@@ -1,0 +1,19 @@
+{
+  "active_strategy_ids": [
+    "stg-vegas-tunnel",
+    "stg-ict-liquidity",
+    "stg-po3",
+    "stg-triple-tap"
+  ],
+  "analysis_date": "2026-09-11",
+  "baseline_sha": "0000000000000000000000000000000000000000",
+  "manifest_digest": "8bb3275342e76bb0406ec6efecc0bcf99f1344b5a1f8bad321dad993611f757b",
+  "output_artifacts": {
+    "strategy-performance.json": {
+      "path": "exports/method-validation/b2/strategy-performance.json",
+      "sha256": "caad7b39ee0b7b669ef5d7f1e2194db2d6de957a16137b1e3f40436b44335f35"
+    }
+  },
+  "schema_version": "method-validation-b2.v1",
+  "synthetic": true
+}

@@ -1,0 +1,47 @@
+{
+  "active_strategy_ids": [
+    "stg-vegas-tunnel",
+    "stg-ict-liquidity",
+    "stg-po3",
+    "stg-triple-tap"
+  ],
+  "freeze_baseline_sha": "0000000000000000000000000000000000000000",
+  "freeze_date": "2026-09-11",
+  "manifest_digest": "0d0f16ffc621cc2287ae626240a0135bf192a6fecc661c76e64b4acf983aa9d7",
+  "schema_version": "method-validation-b3.v1",
+  "strategy_versions": [
+    {
+      "freeze_status": "frozen",
+      "lifecycle_at_freeze": "active",
+      "rule_definition_sha256": "db27aeb1f17893c1537c9da7234ed882f8ec086b90c93c4f951fd317b0cfe856",
+      "rule_version": "stg-vegas-tunnel:v1",
+      "strategy_id": "stg-vegas-tunnel",
+      "version_file_sha256": "a74f1c3e3141d98c002babd8816c027052fad58508b7086ef0d1c96310d81f20"
+    },
+    {
+      "freeze_status": "frozen",
+      "lifecycle_at_freeze": "active",
+      "rule_definition_sha256": "c966a64d2815cc2fc9ab070dc3c1cb6e2180ffa2d868ae829ca5557a287ea17f",
+      "rule_version": "stg-ict-liquidity:v1",
+      "strategy_id": "stg-ict-liquidity",
+      "version_file_sha256": "a6e1e8e4bbae8926b0e7253973026d01a38e59fb685054fb66ba0a1d9b9b96b6"
+    },
+    {
+      "freeze_status": "frozen",
+      "lifecycle_at_freeze": "active",
+      "rule_definition_sha256": "dbea5b3129abb8f8ebdc47d4c381ea794fb9f2bc7a30d18f6260660cf08db08d",
+      "rule_version": "stg-po3:v1",
+      "strategy_id": "stg-po3",
+      "version_file_sha256": "290f7044b7cba8307ab4ea604087125afc79d2b8fcaec3162a626cee60ba320d"
+    },
+    {
+      "freeze_status": "frozen",
+      "lifecycle_at_freeze": "active",
+      "rule_definition_sha256": "69e0a8ab97c2cce8ef141beeaa3a722500c160a0c0e9d4224b8129908160ab07",
+      "rule_version": "stg-triple-tap:v1",
+      "strategy_id": "stg-triple-tap",
+      "version_file_sha256": "09289c96b8585b287b86a0a150c93de9626c73eac55b304a07a7dc317cbd177d"
+    }
+  ],
+  "synthetic": true
+}

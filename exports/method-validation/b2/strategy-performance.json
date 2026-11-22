@@ -1,0 +1,22 @@
+{
+  "schema_version": "method-validation-b2.v1",
+  "strategies": [
+    {
+      "rule_observability": [],
+      "strategy_id": "stg-vegas-tunnel"
+    },
+    {
+      "rule_observability": [],
+      "strategy_id": "stg-ict-liquidity"
+    },
+    {
+      "rule_observability": [],
+      "strategy_id": "stg-po3"
+    },
+    {
+      "rule_observability": [],
+      "strategy_id": "stg-triple-tap"
+    }
+  ],
+  "synthetic": true
+}
