@@ -1,0 +1,125 @@
+schema_version: strategy-change.workflow.v1
+workflow_id: strategy_change
+authority: trading-record
+status: operational
+effect: REPO_CHANGE
+owner_facing: false
+
+purpose: >-
+  Add a strategy, publish a new rule version of a strategy, or stop using a version, as
+  Owner-approved append-only registry changes. This is the step that follows an adopted
+  Strategy Health research hypothesis (workflows/strategy-health-check.yaml adoption_path). It is
+  not a fifth Owner-facing operation and Analyze never starts it: it runs only after the Owner
+  explicitly asks.
+
+entry:
+  starts_only_when: the_owner_explicitly_asks_to_add_a_strategy_or_adopt_a_change_or_stop_a_version
+  never_started_by:
+    - strategy_health_check
+    - performance_analysis
+    - registration
+    - review
+    - provider_sync
+  agent_first: >-
+    The Owner speaks to the Agent. The Agent drafts the rule version in plain language, the
+    Owner confirms it once in the conversation, and the Agent makes the change, tests it and
+    opens the pull request. The Owner never edits a registry file or runs a command.
+
+owner_decisions:
+  recorded: 2026-10-13
+  a_published_rule_version_is_never_edited: true
+  an_improvement_is_always_a_new_version: true
+  frozen_b1_b3_strategies_may_get_new_versions: true
+  b1_b3_historical_numbers_stay_untouched: true
+  a_new_version_does_not_retire_the_previous_one: true
+  only_the_owner_stops_a_version: true
+  owner_word_for_stopping_a_version: 凍結
+
+semantics:
+  usable_version: listed_in_rule_versions_and_version_file_status_active_and_not_in_retired_rule_versions
+  default_version: the_newest_usable_version_which_is_the_last_one_listed
+  owner_may_name_an_older_usable_version: owner_attestation.rule_version
+  rule_observation_path: >-
+    The usable versions of one strategy are alternatives, not competing strategies. The newest
+    version whose required rules all pass represents the strategy; if none passes, the newest.
+    Two versions of the same strategy matching is never AMBIGUOUS.
+  registered_trades_keep_their_version: >-
+    A registered trade keeps the version of its frozen resolution. Its Registration Packet pins
+    that version (strategy_version_pin: strategy_id, rule_version and a digest of the version and
+    every version it inherits from). Replay of a frozen decision evaluates exactly the versions in
+    its frozen matrix, whether or not they are still usable.
+  adding_or_stopping_other_versions_never_invalidates_a_registered_trade: true
+
+change_types:
+  new_strategy:
+    owner_supplies: [name, entry_rules, stop_loss_rule, take_profit_rule, conditions, instruments_if_limited]
+    agent_writes:
+      - registry/versions/<strategy-id>-v1.yaml (frozen rule version, status active)
+      - an entry in registry/strategy-registry.yaml (status active, rule_versions [<id>:v1])
+  new_version:
+    owner_supplies: [what_changes_and_why, the_new_rules]
+    agent_writes:
+      - registry/versions/<strategy-id>-vN.yaml (supersedes the previous version; status active)
+      - <id>:vN appended to the strategy's rule_versions in registry/strategy-registry.yaml
+    never:
+      - editing any existing version file
+      - removing or reordering an existing entry of rule_versions
+  stop_a_version:
+    owner_says: stop <strategy> vN
+    agent_writes: <id>:vN added to the strategy's retired_rule_versions
+    never: editing the version file (its digest is pinned by registered packets)
+    effect: new trades no longer use that version; every registered trade keeps it
+  retire_a_strategy:
+    owner_says: stop using <strategy>
+    agent_writes: status retired and retired_on / retired_note; records are never deleted
+
+guards:
+  b1_b3_historical_freeze:
+    baseline: trading_os.registry.B3_BASELINE_RULE_VERSIONS
+    allowed_without_touching_the_guard: [a_new_strategy, a_new_version_of_any_strategy, retired_rule_versions]
+    blocked: [editing_or_deleting_a_baseline_strategy_or_version, reactivating_a_retired_baseline_strategy]
+    check: >-
+      The registry projected back to the B3 baseline (trading_os.registry.registry_as_of_b3) must
+      still have the registry digest recorded in exports/method-validation/b3/manifest.json, and
+      each frozen B3 version file must be byte-identical to its manifest hash.
+  legacy_registration_packets: >-
+    Packets frozen before strategy_version_pin pinned the whole registry digest. They stay valid
+    while the registry projected to the B3 baseline equals that digest.
+
+steps:
+  - id: draft_with_owner
+    action: Agent restates the change in plain language and shows the exact rules or the retirement; the Owner confirms once.
+  - id: write_version_files
+    action: Create the new frozen version file; never edit an existing one.
+  - id: update_registry
+    action: Append only (new strategy, new version, or retired_rule_versions). Run registry validation.
+  - id: tests
+    action: >-
+      Add tests for the change, then run the full suite. Include a resolver case showing the older
+      usable version is still resolved when the Owner names it, and that registered packets still
+      validate.
+  - id: pull_request
+    action: >-
+      Open a pull request (a registry change is a REPO_CHANGE, never a direct main write). The
+      Owner decides when it merges; the Agent never merges without the Owner's explicit word.
+  - id: after_merge
+    action: >-
+      Re-validate every frozen registration packet read-only
+      (python -m trading_os registration-packet validate --packet <file>), and tell the Owner that
+      any registration preview prepared but not yet confirmed must be redone because the strategy
+      decision it contains now lists the new strategy or version. Once a trade is registered to the
+      new strategy or version, confirm in the analytics projection that it is counted in the named
+      strategy statistics (not excluded as inactive_strategy) under the version it is bound to.
+
+health_check_follow_up: >-
+  After a strategy has a new version, Strategy Health reports each rule version as its own
+  population and never pools them (workflows/strategy-health-check.yaml version_comparison).
+
+completion:
+  CHANGE_MERGED: >-
+    The pull request is merged, every frozen registration packet still validates, the Owner has
+    been told which previews to redo, and the new version is the default for new trades unless the
+    Owner named another.
+  BLOCKED: >-
+    The B1/B3 guard, registry validation, the tests, or a registered packet validation fails.
+    Do not merge and do not edit a frozen version file to make a check pass.

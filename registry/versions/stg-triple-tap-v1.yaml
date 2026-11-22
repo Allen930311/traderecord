@@ -1,0 +1,134 @@
+version_id: stg-triple-tap:v1
+rule_version: stg-triple-tap:v1
+schema_version: strategy-rule-version.v1
+status: active
+strategy_id: stg-triple-tap
+lifecycle_at_freeze: active
+classification: variant
+parent_strategy_id: stg-ict-liquidity
+inherits_from: stg-ict-liquidity:v1
+freeze_date: '2026-09-11'
+freeze_baseline_sha: '0000000000000000000000000000000000000000'
+authority_class: owner_authority_and_canonical_strategy_definition
+effective_from: null
+effective_to: null
+supersedes: null
+evidence_refs:
+- evidence_id: definition.triple-tap
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier2_canonical_strategy_definition
+- evidence_id: trade.triple-tap.2025-09-09
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.triple-tap.2026-04-17
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+inheritance:
+  inherited_rule_ids:
+  - ict_liquidity.identity
+  - ict_liquidity.entry_expression
+  - ict_liquidity.structure_confirmation
+  - ict_liquidity.invalidation
+  - ict_liquidity.target
+  added_rule_ids:
+  - triple_tap.identity
+  - triple_tap.liquidity_touch_count
+  - triple_tap.rsi_divergence
+  - triple_tap.mss_confirmation
+  optional_rule_ids: []
+  overrides: []
+rule_surface:
+  identity: Synthetic example text; replace with your own strategy definition.
+  context: Synthetic example text; replace with your own strategy definition.
+  direction: Synthetic example text; replace with your own strategy definition.
+  timeframe: Synthetic example text; replace with your own strategy definition.
+  prerequisites: Synthetic example text; replace with your own strategy definition.
+  setup_sequence: Synthetic example text; replace with your own strategy definition.
+  entry_trigger: Synthetic example text; replace with your own strategy definition.
+  invalidation: Synthetic example text; replace with your own strategy definition.
+  target_exit: Synthetic example text; replace with your own strategy definition.
+  disqualifiers: Synthetic example text; replace with your own strategy definition.
+unresolved:
+- item_id: triple_tap.rsi_threshold
+  claim_class: OPTIONAL/CONFIRMATION
+  status: unresolved
+  blocking: false
+  eligibility_impact: false
+  decision_packet: Synthetic example text; replace with your own strategy definition.
+rules:
+- rule_id: triple_tap.identity
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: triple_tap
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule triple_tap.identity.
+  evidence_refs:
+  - definition.triple-tap
+  - trade.triple-tap.2025-09-09
+  - trade.triple-tap.2026-04-17
+- rule_id: triple_tap.liquidity_touch_count
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: liquidity_touch_3x
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule triple_tap.liquidity_touch_count.
+  evidence_refs:
+  - definition.triple-tap
+  - trade.triple-tap.2026-04-17
+- rule_id: triple_tap.rsi_divergence
+  category: confirmation
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: rsi_divergence
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - chart_snapshot
+  - manual_note
+  claim_class: REQUIRED
+  statement: Synthetic example rule triple_tap.rsi_divergence.
+  evidence_refs:
+  - definition.triple-tap
+  - trade.triple-tap.2026-04-17
+- rule_id: triple_tap.mss_confirmation
+  category: confirmation
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: mss
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule triple_tap.mss_confirmation.
+  evidence_refs:
+  - definition.triple-tap
+  - trade.triple-tap.2025-09-09
+  - trade.triple-tap.2026-04-17

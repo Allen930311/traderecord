@@ -1,0 +1,745 @@
+schema_version: registration-execution.workflow.v1
+workflow_id: registration_execution
+authority: trading-record
+status: operational
+effect: PROJECT_RUNTIME_WRITE
+owner_facing: false
+
+purpose: >-
+  Execute one owner-confirmed frozen Registration Packet into canonical Trading Record
+  truth. This is the only write-side execution contract for real-trade registration,
+  whether the same write-capable agent continues immediately after owner confirmation or
+  a different write-capable agent receives a handoff package.
+
+blocked_conditions_reference: workflows/blocked-conditions-index.yaml
+
+architecture:
+  kind: write_side_workflow_over_existing_system
+  new_state_model: false
+  upstream_workflow: workflows/trade-registration.yaml
+  canonical_record_workflow: workflows/record-reconciliation.yaml
+  lifecycle_authority: trading_os.operational_lifecycle.LifecycleStore
+  evidence_store: trading_os.evidence_store.EvidenceStore
+  strategy_authority: registry/strategy-registry.yaml
+  retrospective_attribution_authority: registry/retrospective-attribution.yaml
+
+runtime_surface:
+  executor_module: trading_os.registration_executor
+  executor_command: python -m trading_os registration-executor run --input <registration-executor-input.json>
+  batch_command: python -m trading_os registration-executor run-batch --input <input-1.json> --input <input-2.json>
+  batch_contract: >-
+    Several Owner-confirmed compact intakes (registration-executor-input.v2, each with its own
+    preview digest and Owner confirmation) are staged one after another on one mutation base, then
+    share a single test run, a single commit and a single push, followed by an exact remote
+    read-back of every trade. Each trade is validated exactly as in a single run. A batch always
+    runs in its own isolated worktree, never in a shared checkout, so abandoning a failed batch
+    cannot touch anyone else's files; the error names the trades staged and whether origin/main
+    moved. Two inputs for the same provider lifecycle are rejected before any commit.
+  executor_input_schemas: [registration-executor-input.v1, registration-executor-input.v2]
+  executor_behavior:
+    accepts: [owner_confirmed_compact_same_agent_intake, owner_confirmed_packet_draft, owner_confirmed_frozen_packet]
+    packet_builder: trading_os.registration_packet.freeze_packet
+    compact_intake_adapter: trading_os.registration_packet.build_registration_intake
+    compact_intake_input:
+      executor_schema: registration-executor-input.v2
+      intake_schema: registration-intake.v1
+      fields: [registration_intake, owner_confirmation]
+      supported_transport: same_agent_raw_image_paths_only
+      external_handoff_uses_existing_v1_packet_and_manifest_route: true
+      agent_full_packet_assembly_required: false
+      owner_digest_recomputed_before_evidence_ingest: true
+    capture_semantics_field: canonical_capture
+    capture_semantics_digest: included_in_packet_sha256
+    required_capture_fields_ref:
+      canonical_source: workflows/trade-registration.yaml#registration_packet.executor_input
+      summary: 10 required canonical_capture keys plus [realized_r, realized_r_authority] for CLOSED trades.
+    orchestration_owner: project_runtime
+    writer_owner: existing_packet_EvidenceStore_LifecycleStore_projection_test_lane_Git_surfaces
+  module: trading_os.registration_packet
+  packet_schema_version: registration-packet.v2
+  legacy_readable_packet_schema_versions: [registration-packet.v1]
+  commands:
+    freeze: python -m trading_os registration-packet freeze --input <confirmed-draft.json> --output <frozen-packet.json> --transport-mode <same_agent|external_handoff> [--manifest <manifest.json>]
+    validate: python -m trading_os registration-packet validate --packet <frozen-packet.json> [--manifest <manifest.json> --evidence-root <dir>]
+    persist: python -m trading_os registration-packet persist --packet <frozen-packet.json> [--manifest <manifest.json> --evidence-root <dir>] [--recorded-at <iso8601>]
+  frozen_packet_store: canonical/registration/packets/<packet_sha256>.json
+  legacy_pending_reader: trading_os.registration_pending.load_pending
+  legacy_pending_store: canonical/registration/pending-strategy.jsonl
+  unresolved_packet_status: READY_FOR_RECORD_RECONCILIATION
+  unresolved_trade_state: registered_LIVE_with_strategy_resolution_unresolved
+  census_projection: trading_os.registration_census
+
+
+entry_modes:
+  same_agent:
+    condition: current_agent_has_authorized_write_capability
+    input: owner_confirmed_compact_intake_v2_or_owner_confirmed_packet_draft_or_frozen_packet
+    external_handoff_required: false
+  handoff_receiver:
+    condition: authorized_write_capable_agent_received_handoff_package
+    input: frozen_registration_packet_plus_exact_evidence_package
+    external_handoff_required: true
+    allowed_packet_commands: [validate, persist]
+    forbidden_packet_commands: [freeze]
+
+write_capability_required:
+  - authorized_repository_write
+  - authorized_runtime_canonical_mutation
+  - git_commit_and_push_to_origin_main
+  - remote_main_commit_and_object_read_back
+
+semantic_freeze_contract:
+  required: true
+  owner_confirmation_state: confirmed
+  packet_semantic_state: frozen
+  executor_role: validate_and_execute
+  executor_must_not:
+    - redo_trade_review
+    - reanalyze_images_to_replace_confirmed_meaning
+    - replace_owner_recollection
+    - replace_owner_judgment
+    - change_agreed_facts
+    - silently_resolve_unresolved_facts
+    - choose_a_different_strategy
+    - construct_new_strategy_observations
+    - replace_confirmed_strategy_resolution
+    - mutate_strategy_registry
+  semantic_change_required_action: >-
+    Stop execution and return OWNER_RECONFIRMATION_REQUIRED to trade_registration.
+    Never repair a semantic mismatch by editing the frozen packet in place.
+
+required_packet_contract:
+  canonical_source: workflows/trade-registration.yaml#registration_packet
+  note: >-
+    Accepts registration-packet.v2 per workflows/trade-registration.yaml.
+    Schema keys below mirror the executor validation contract alongside
+    execution-specific verbatim persistence, snapshot enforcement, and BLOCKED gates.
+  required_sections:
+    - provider_facts
+    - image_evidence
+    - agent_observation
+    - agent_assessment
+    - owner_recollection
+    - owner_judgment
+    - agreed_facts
+    - unresolved_facts
+    - resolver_input
+    - strategy_resolution
+    - authority_pins
+    - canonical_review_projection
+    - research_hypotheses
+  owner_verbatim_contract:
+    packet_field: owner_recollection.verbatim_text
+    required_for: every_new_registration
+    preflight_before_evidence_ingest: true
+    semantics: exact_owner_supplied_text_including_unicode_whitespace_and_punctuation
+    preview: display_verbatim_and_include_in_owner_confirmation_digest
+    separation:
+      owner_text: owner_recollection.verbatim_text
+      agent_interpretation: [agent_observation, agent_assessment]
+      provider_authority: provider_facts
+    persistence:
+      writer: trading_os.operational_lifecycle.LifecycleStore
+      event: owner_statement_recorded
+      timing: append_after_canonical_trade_exists_before_projection_refresh
+      retry: same_packet_source_and_text_is_idempotent; changed_text_is_rejected
+      projection_retry: verify_first_then_refresh_derived_only_if_stale
+    legacy_rule: >-
+      Existing registered frozen packets without verbatim text remain immutable and readable.
+      Do not alter their packet, canonical trade, or prior lifecycle events; a governed Owner
+      supplement uses the same LifecycleStore append-only event and current recording time.
+  required_confirmation_metadata:
+    owner_confirmation: [status, confirmed_at, preview_digest]
+    packet: [packet_version, semantic_state, packet_sha256, transport_mode]
+    authority_pins:
+      - provider_lifecycle_key
+      - source_main_sha
+      - strategy_registry_digest
+      - strategy_version_pin
+      - resolver_version
+    conditional_authority_pins:
+      owner_attestation_present:
+        - retrospective_attribution_registry_digest
+  transport_contract:
+    canonical_source: workflows/trade-registration.yaml#registration_packet.transport_mode
+    external_handoff_runtime_rule: >-
+      Any packet frozen with transport_mode=external_handoff automatically requires
+      evidence manifest + evidence root during validate/persist/capture. This is enforced
+      by runtime from the packet itself, not by caller flags.
+  required_handoff_integrity_when_external:
+    - packet_sha256
+    - evidence_manifest_sha256
+    - exact_original_evidence_bytes
+    - per_artifact_sha256
+    - original_filenames
+  image_evidence_binding:
+    packet_field: image_evidence
+    identity: [sha256, original_filename, location]
+    preserved_semantics:
+      - timing
+      - captured_at
+      - provenance.capture_mode
+      - represented_market_time
+      - role
+      - timing_relative_to_trade
+    same_agent_rule: >-
+      Every packet image must resolve to an immutable EvidenceStore artifact with the same
+      SHA/locator/original filename and matching stored bytes. Executor input may provide
+      image_files keyed by the exact SHA; the runtime validates all original_filename values
+      as safe basenames before staging any bytes, uses runtime-generated temporary names, and
+      may derive a missing durable locator from the ingested exact bytes before official freeze.
+    external_handoff_rule: >-
+      Packet owner-image identities must exactly equal external manifest owner-image
+      identities before package bytes are accepted. Manifest-only or packet-only images
+      are BLOCKED.
+  owner_confirmation_snapshot:
+    digest_field: owner_confirmation.preview_digest
+    covers: [provider_facts, image_SHA_and_provenance, canonical_capture, owner_and_agent_semantics, resolver_input, strategy_resolution, external_manifest_SHA]
+    excludes_runtime_only: [authority_pins, EvidenceStore_locator, packet_sha256, semantic_state]
+    enforcement_points: [freeze, Executor_preflight_before_image_ingest, frozen_packet_validation]
+    mismatch: OWNER_RECONFIRMATION_REQUIRED
+  gates:
+    owner_confirmation_not_confirmed: BLOCKED
+    semantic_state_not_frozen: BLOCKED
+    missing_required_section_or_metadata: BLOCKED
+    packet_digest_mismatch: BLOCKED
+    evidence_manifest_digest_mismatch: BLOCKED
+    evidence_byte_sha_mismatch: BLOCKED
+    packet_manifest_image_identity_mismatch: BLOCKED
+    same_agent_image_not_in_evidence_store: BLOCKED
+
+authority_pin_validation:
+  source_main_sha:
+    purpose: records the shared main state used when the owner confirmed the packet
+    rule: >-
+      Current origin/main may advance, but execution must compare relevant authority
+      surfaces before continuing; main drift alone does not permit reinterpretation.
+  provider_facts:
+    rule: >-
+      Re-read provider truth for the exact provider lifecycle. If execution facts that
+      were presented to the owner changed materially, stop with OWNER_RECONFIRMATION_REQUIRED.
+      Do not silently update the frozen packet.
+  strategy_version_pin:
+    rule: >-
+      A new packet pins only the frozen rule version its registration used: strategy_id,
+      rule_version and version_digest (the digest of that parsed version file), or null for a
+      NO_MATCH or unresolved attribution. A change to that version, or its disappearance,
+      requires OWNER_RECONFIRMATION_REQUIRED. Adding an unrelated strategy to the registry
+      does not invalidate a registered packet, so an idempotent ALREADY_REGISTERED retry keeps
+      working. The digest covers the selected version and every version it inherits from.
+      The pin is part of the Owner's confirmation snapshot (preview_digest), so a version that
+      changes between preview and freeze requires a fresh preview, and a new registration
+      without the pin is refused at persist. Resolver replay must reproduce the frozen decision
+      and every frozen matrix entry exactly; entries for strategies added later may appear in
+      the replay matrix.
+  strategy_registry_digest:
+    rule: >-
+      Recorded as provenance for a new packet and not enforced there. A legacy packet that
+      has no strategy_version_pin is accepted while the registry digest is unchanged, or the
+      registry still equals the frozen B3 baseline (trading_os.registry.registry_as_of_b3:
+      strategies and rule versions added since, and retired_rule_versions, do not count);
+      any change to what B3 froze requires OWNER_RECONFIRMATION_REQUIRED.
+  retrospective_attribution_registry_digest:
+    required_when: resolver_input.owner_attestation_is_present
+    rule: >-
+      The active retrospective expression/context registry must match the Owner-confirmed
+      packet pin. Drift requires OWNER_RECONFIRMATION_REQUIRED; never remap a frozen
+      expression or context silently.
+  resolver_validation:
+    allowed: deterministic_integrity_replay_only
+    canonical_evidence_policy: AUTHORITY.md
+    canonical_timing_contract: workflows/trade-registration.yaml#evidence_timing_contract
+    rule: >-
+      Replay the resolver only with the exact frozen resolver input (including any
+      frozen owner_attestation and retrospective_observations) and exact pinned
+      registry/rule authority to prove integrity. Never add observations, inspect
+      charts to invent new rule facts, accept a different result, or update the packet.
+      Replay respects provenance-vs-admissibility per canonical_evidence_policy and
+      canonical_timing_contract, and every material contradiction must preserve its
+      code, exact observed_fact, evidence refs, and provider-verified event comparison
+      when claiming a trigger occurred after entry.
+    mismatch: OWNER_RECONFIRMATION_REQUIRED
+
+provider_and_canonical_preflight:
+  - Re-read the exact provider lifecycle and verify provider execution facts.
+  - Re-read Registration Census and canonical identity links/finalizations.
+  - If already REGISTERED, return the existing T-ID only after packet_sha256 and canonical instrument/direction/strategy_resolution read-back match the frozen packet; never duplicate.
+  - If IN_PROGRESS, resume/return in-progress only when the durable draft and provider binding carry the exact same packet_sha256 and canonical semantics match; missing/different packet binding is BLOCKED.
+  - If legacy Census state is STRATEGY_PENDING, retry the same provider lifecycle through current capture; after provider identity and entry verification, register it even if the frozen resolver result remains unresolved.
+  - AMBIGUOUS or invalid provider lifecycle states fail closed.
+
+evidence_execution_contract:
+  external_handoff:
+    - Verify package manifest and every exact original byte against SHA256 before ingest.
+    - Never recompress, crop, rename as replacement, or substitute an image.
+  repository_ingest:
+    required_before_trade_mutation: true
+    action: >-
+      Ingest exact originals through EvidenceStore and obtain durable SHA/locator identity.
+      Historical replay/reconstruction images default to review/post_trade/chart_snapshot
+      unless the frozen packet carries genuine historical provenance proving otherwise.
+  packet_persistence:
+    required_before_trade_mutation: true
+    canonical_path: canonical/registration/packets/<packet_sha256>.json
+    branches:
+      same_agent:
+        command: python -m trading_os registration-packet persist --packet <frozen-packet.json>
+      external_handoff:
+        command: python -m trading_os registration-packet persist --packet <frozen-packet.json> --manifest <manifest.json> --evidence-root <dir>
+    resolved_binding:
+      draft_provenance_field: registration_packet_sha256
+      lifecycle_projection_field: registration_packet_sha256
+      provider_binding_field: registration_packet_sha256
+      retry_rule: exact_packet_sha_and_canonical_semantics_required
+    action: >-
+      Persist the owner-confirmed frozen Registration Packet immutably by packet SHA.
+      Registration durably binds that packet SHA into draft/lifecycle state and
+      provider binding before REGISTERED or IN_PROGRESS retry can return existing state.
+      Unresolved resolver status returns READY_FOR_RECORD_RECONCILIATION and does not write
+      a new STRATEGY_PENDING row. The packet is registration-control evidence, not a
+      LifecycleStore.review payload.
+      Preserve semantic content exactly.
+
+strategy_execution_contract:
+  allowed_confirmed_statuses_for_trade_registration:
+    - MATCHED
+    - NO_MATCH
+    - AMBIGUOUS
+    - INSUFFICIENT_EVIDENCE
+  MATCHED:
+    rule: use the frozen resolver-produced strategy_id and rule_version; do not choose another
+  NO_MATCH:
+    rule: register the real trade with null strategy identity and strategy_stats_eligible=false
+  AMBIGUOUS:
+    rule: >-
+      persist strategy_resolution.status=unresolved with null strategy identity; continue
+      registration after provider identity and entry verification. Do not assign a default strategy.
+  INSUFFICIENT_EVIDENCE:
+    rule: >-
+      persist strategy_resolution.status=unresolved with null strategy identity; continue
+      registration after provider identity and entry verification. Do not assign a default strategy.
+
+plan_contract:
+  live_unknown_values: [unknown, not_observable, null]
+  missing_plan_blocks_T_ID: false
+  completeness_field: canonical_trade.plan.completeness
+  values: [complete, partial]
+  rule: Never infer plan values from actual execution or close facts.
+
+recording:
+  delegates_to: workflows/record-reconciliation.yaml
+  real_historical_mode: LIVE_retrospective_frozen_registration
+  frozen_capture_commands:
+    same_agent: >-
+      python -m trading_os capture retrospective-live --registration-packet-file
+      <canonical/registration/packets/packet_sha.json> <provider/capture args>
+    external_handoff: >-
+      python -m trading_os capture retrospective-live --registration-packet-file
+      <canonical/registration/packets/packet_sha.json> --registration-manifest
+      <manifest.json> --registration-evidence-root <dir> <provider/capture args>
+  contract: >-
+    record_reconciliation receives the frozen packet as read-only semantic input. The
+    retrospective frozen-registration capture path validates the exact packet and consumes
+    its already-resolved strategy_resolution directly; it must not call resolve_live_strategy,
+    add SL/TP plan facts, or run a second semantic strategy resolution.
+  historical_closed_trade_required_end_state:
+    canonical_state: CLOSED
+    exit_verification_state: confirmed
+    review_status: not_started
+
+projection_closure:
+  required_when_canonical_mutated: true
+  command: python -m trading_os projections refresh --target-trade <trade_id>
+  sequence:
+    - analytics
+    - health
+    - trade_view
+    - handoff
+    - verify
+  stale_result: PROJECTION_STALE
+  local_verification:
+    performed_by: projections.refresh
+    explicit_second_verify: false
+    rule: >-
+      projections refresh returns its embedded digest-chain and target-visibility
+      verification. Do not run a second local projections verify immediately after a
+      successful refresh; preserve the returned verification result as the gate.
+
+persistence:
+  routine_record:
+    effect_class: PROJECT_RUNTIME_WRITE
+    delivery: direct_main
+    pr_required: false
+    sequence:
+      - fetch_origin_main
+      - reuse_clean_checkout_or_create_one_isolated_worktree
+      - execute_registration_executor
+      - projection_refresh_and_verify
+      - required_tests
+      - verify_tested_diff_before_commit_and_push
+      - commit_and_push_origin_main
+      - fetch_origin_main_and_read_back_exact_remote_objects
+      - clean_execution_worktree
+    checkout_selection:
+      reuse_when: [working_tree_clean, HEAD_equals_origin_main]
+      isolate_when: [owner_working_tree_has_uncommitted_files, checkout_is_behind_origin_main]
+      isolated_worktrees_per_run: 1
+      preserve_source_working_tree: true
+      source_local_commits_not_in_origin_main: BLOCKED
+      failure_cleanup: preserve_isolated_worktree_for_diagnosis
+    remote_readback:
+      fresh_checkout_required: false
+      equivalence_gate:
+        - fetched_origin_main_sha_equals_pushed_commit_sha
+        - git_show_remote_canonical_record_and_lifecycle
+        - git_show_remote_provider_identity_link_and_frozen_packet
+        - read_remote_EvidenceStore_bytes_and_rehash_against_SHA256
+        - read_remote_Registration_Census_and_recompute_rows_counts_against_provider_and_canonical_sources
+        - read_remote_analytics_health_trade_view_handoff_artifacts_and_manifests
+        - verify_projection_chain_and_target_visibility_before_push_on_the_same_commit_tree
+      mismatch: BLOCKED
+  system_change:
+    when: code_workflow_schema_authority_or_missing_capability_change_required
+    effect_class: REPO_CHANGE
+    delivery: pull_request
+    rule: >-
+      Do not mix a system fix into the routine registration commit. Stop execution,
+      open/fix the system PR, then resume the same frozen packet only when its semantic
+      and authority pins remain valid; otherwise return for owner reconfirmation.
+
+test_policy:
+  classification: >-
+    DATA_ONLY_REGISTRATION is selected only when the complete non-empty diff from the
+    fresh mutation base consists exclusively of paths listed below and every path also
+    matches record-reconciliation.yaml persistence_policy.routine_artifact_allowlist.
+    The fast lane accepts only added/modified paths. An empty diff, unreadable diff,
+    deletion/type change, unknown path, or mixed system/data diff selects the full
+    required suite. The classifier reads tracked/untracked paths and statuses; Agents do
+    not select a lane by judgment.
+  data_only_registration:
+    path_rules:
+      - '^PERFORMANCE\.md$'
+      - '^canonical/drafts/rec_[0-9a-f]{20}\.json$'
+      - '^canonical/records/trades/trd_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$'
+      - '^canonical/sequences/(?:numbers|finalizations)\.json$'
+      - '^canonical/lifecycle/(?:current\.json|events\.jsonl|identity-links\.jsonl)$'
+      - '^canonical/evidence/artifacts/[0-9a-f]{64}\.(?:png|jpe?g|webp|json|txt|md|jsonl|pdf)$'
+      - '^canonical/evidence/artifacts/[0-9a-f]{64}\.metadata\.json$'
+      - '^canonical/registration/packets/[0-9a-f]{64}\.json$'
+      - '^provider-ledgers/propw/registration-census\.json$'
+      - '^exports/operational/(?:analytics|handoff|health)/(?:current|manifest)\.json$'
+      - '^exports/operational/trade-view/(?:manifest|trade-view-data)\.json$'
+    pytest_targets:
+      - "tests/test_registration_fast_path.py::test_system_change_and_empty_diff_select_full_suite"
+      - "tests/test_registration_fast_path.py::test_executable_data_mode_forces_full_suite"
+      - "tests/test_registration_census.py"
+      - "tests/test_registration_packet.py::test_manifest_and_exact_bytes_are_validated"
+      - "tests/test_registration_packet.py::test_external_packet_image_sha_must_match_manifest_and_bytes"
+      - "tests/test_registration_packet.py::test_same_agent_image_evidence_must_exist_in_evidence_store"
+      - "tests/test_registration_packet.py::test_closed_provider_facts_are_fail_closed_before_freeze"
+      - "tests/test_registration_packet.py::test_tampered_packet_fails_digest_before_execution"
+      - "tests/test_registration_packet.py::test_frozen_packet_cannot_be_refrozen_to_repin_authority"
+      - "tests/test_registration_packet.py::test_existing_resolution_drift_is_rejected"
+      - "tests/test_provider_lifecycle_uniqueness.py::test_rerunning_the_same_lifecycle_returns_the_original_trade"
+      - "tests/test_capture_live_provider_evidence_split.py::test_capture_retrospective_live_rejects_missing_provider_evidence"
+      - "tests/test_capture_live_provider_evidence_split.py::test_capture_retrospective_live_chart_evidence_never_becomes_execution_authority"
+      - "tests/test_trade_registration_workflow.py::test_frozen_registration_capture_requires_durable_packet_persistence"
+      - "tests/test_trade_registration_workflow.py::test_registered_frozen_retry_requires_same_packet_identity"
+      - "tests/test_trade_registration_workflow.py::test_in_progress_frozen_retry_requires_same_packet_identity"
+      - "tests/test_operational_closeout.py::test_identity_evidence_must_be_attached_entry_provider_execution_evidence"
+      - "tests/test_operational_closeout.py::test_close_recorded_without_verified_exit_is_not_countable"
+      - "tests/test_operational_closeout.py::test_illegal_lifecycle_transitions_are_rejected"
+      - "tests/test_evidence_store.py"
+      - "tests/test_projections.py"
+    parallel_focused_run: >-
+      The lane lists the exact pytest node ids these targets select and runs each one exactly once
+      across up to six pytest processes; every process must pass. If the ids cannot be listed, or
+      only one core is available, the same targets run serially. The full suite is never split.
+    preserves:
+      - provider_verification
+      - evidence_sha256_and_exact_bytes
+      - frozen_packet_integrity_and_resolver_pins
+      - t_id_allocation_census_and_idempotency
+      - lifecycle_transition_and_entry_exit_invariants
+      - projection_digest_chain_and_target_visibility
+      - remote_main_read_back
+  full_suite:
+    commands:
+      - [python, -m, pytest, tests, -q, -p, no:cacheprovider]
+      - [python, -m, pytest, ingestion/intake/tests, -q, -p, no:cacheprovider]
+      - [python, -m, pytest, ingestion/propw/tests, -q, -p, no:cacheprovider]
+    required_when:
+      - empty_diff
+      - any_path_outside_data_only_registration_allowlist
+      - code_schema_registry_or_workflow_change
+      - classifier_error
+  telemetry:
+    schema: registration-fast-path-telemetry.v1
+    clock: monotonic_elapsed_seconds
+    canonical_trade_fields_modified: false
+    receipt: return_workflow_receipt_only
+    measurement:
+      timer: time.perf_counter_ns
+      elapsed_seconds: "(finished_ns - started_ns) / 1000000000"
+      boundaries:
+        registration_runtime: "execution workflow entry to completed record_reconciliation capture/close verification"
+        projection: "read duration_seconds from projections refresh result"
+        focused_tests: "read telemetry.focused_tests_seconds from registration-test-lane run"
+        git_persistence: "commit start to successful fresh-main read-back"
+    segments:
+      registration_runtime: "write-capable registration entry through lifecycle capture/close verification"
+      projection: "projections refresh output duration_seconds, including its built-in verification"
+      focused_tests: "registration-test-lane run output telemetry.focused_tests_seconds"
+      git_persistence: "commit start through fresh-main read-back completion"
+    missing_measurement: null
+  end_to_end_benchmark:
+    schema: registration-executor-telemetry.v1
+    clock: monotonic_elapsed_seconds
+    measured_fields:
+      - agent_tool_calls
+      - agent_documents_read
+      - packet_build_seconds
+      - provider_seconds
+      - evidence_seconds
+      - resolver_seconds
+      - canonical_capture_seconds
+      - projection_seconds
+      - focused_tests_seconds
+      - git_persistence_readback_seconds
+      - owner_confirmed_to_remote_registered_seconds
+    scenarios: [compact_intake_composition, clean_checkout, dirty_source_checkout, external_handoff, already_registered_retry]
+    isolation: synthetic_provider_lifecycle_and_local_bare_remote
+    synthetic_coverage:
+      original_appshots: 2
+      replay_provenance: review_post_trade_retrospective_replay
+      owner_historical_attribution: true
+      expected_strategy_status: MATCHED
+      confirmed_compact_intake_composition:
+        path: [raw_images, compact_intake_preview, owner_confirmation_digest, one_executor_call, canonical_projection_remote_readback]
+        exact_preview_digest_reaches_frozen_packet: true
+        plan_thesis_and_evidence_drift_rejected_before_ingest: true
+        dirty_source_checkout_uses_safe_worktree: true
+      retry_inputs:
+        - unchanged_registration_executor_input_without_source_main_sha
+        - frozen_packet
+        - changed_registered_input_blocked_before_ingest
+      external_handoff:
+        source_manifest_sha256_and_exact_original_bytes: true
+        receiver_validates_before_ingest: true
+        tampered_package_blocked_without_mutation: true
+        fresh_main_remote_readback_required: true
+    protected_trade_ids: [T000027, T000028]
+    acceptance_target_seconds: 180
+    report_over_target: measured_bottleneck_required
+
+workflow:
+  - id: execute_registration
+    command: python -m trading_os registration-executor run --input <registration-executor-input.json>
+    action: >-
+      This is the only normal post-confirmation Agent command. The executor performs the
+      mutation-base capture, packet build/validation, Provider/EvidenceStore/resolver checks,
+      packet persistence, existing Unified Capture and close verification, packet-image
+      attachment, projection closure, required test lane, tested-diff checks, Git persistence
+      and exact remote object read-back. It returns one structured receipt.
+    retry: >-
+      ALREADY_REGISTERED is read-only: verify exact packet binding, existing canonical image
+      evidence, projections and remote objects. For registration-executor-input.v1, first
+      compare the supplied Owner-confirmed semantics with the lifecycle-bound frozen packet
+      and reuse that packet, including its original source_main_sha, only on an exact match.
+      Changed input or an unprovable binding fails before image ingestion. Never ingest,
+      repair, close or rewrite an already-registered trade during a retry.
+    stop_conditions: [BLOCKED, OWNER_RECONFIRMATION_REQUIRED, PROJECTION_STALE, origin_main_advanced]
+    agent_must_not: [write_packet_builder_scripts, chain_registration_cli_commands, create_multiple_worktrees]
+
+
+runtime_workflow:
+  - id: load_fresh_authority
+    action: Fetch origin/main and load current Trading Record authority/workflows.
+  - id: capture_mutation_base
+    command: python -m trading_os registration-test-lane begin
+    action: >-
+      Before any registration mutation, require a clean worktree with HEAD exactly equal to
+      the fetched origin/main commit. Persist the opaque run receipt in this worktree's
+      private Git directory; agents cannot supply or override the mutation-base SHA.
+  - id: validate_packet_envelope
+    branches:
+      same_agent:
+        command: python -m trading_os registration-packet validate --packet <frozen-packet.json>
+      external_handoff:
+        command: python -m trading_os registration-packet validate --packet <frozen-packet.json> --manifest <manifest.json> --evidence-root <dir>
+    action: >-
+      Verify owner confirmation, packet SHA, frozen semantic state, required sections,
+      metadata, and—when transport_mode=external_handoff—the exact evidence package in
+      the same runtime validation call. For a new draft, run the shared Owner, Provider,
+      authority, provenance, resolver, and canonical-capture preflight before any image
+      staging or EvidenceStore write. For a registered draft retry, recover and compare the
+      lifecycle-bound frozen packet before any image staging or EvidenceStore write.
+  - id: validate_authority_pins
+    action: Verify provider facts, strategy registry/rule pins and resolver integrity without changing semantics.
+  - id: preflight_canonical_identity
+    action: Check Census, identity links, finalizations and any pending/in-progress state for this provider lifecycle.
+  - id: ingest_exact_evidence
+    action: >-
+      Validate every Owner filename and source digest before the first write. Stage exact
+      bytes under a runtime-controlled basename, preserve the validated original filename
+      as EvidenceStore metadata, and verify resulting SHA/locator identities.
+  - id: persist_frozen_packet
+    branches:
+      same_agent:
+        command: python -m trading_os registration-packet persist --packet <frozen-packet.json>
+      external_handoff:
+        command: python -m trading_os registration-packet persist --packet <frozen-packet.json> --manifest <manifest.json> --evidence-root <dir>
+    action: >-
+      Persist the frozen Registration Packet immutably without semantic modification.
+      Runtime reads transport_mode from the packet and fails closed if an external handoff
+      omits its evidence package.
+  - id: execute_record_reconciliation
+    delegates_to: record_reconciliation
+    condition: owner_confirmed_frozen_packet_and_provider_facts_valid
+    action: >-
+      Execute the existing LIVE retrospective lifecycle for every resolver outcome. MATCHED
+      uses the frozen identity; NO_MATCH and unresolved attribution preserve null strategy
+      identity. Provider identity and entry verification alone gate T-number allocation.
+      AMBIGUOUS and INSUFFICIENT_EVIDENCE never branch to a registration-pending state.
+  - id: refresh_and_verify_projections
+    condition: canonical_trade_or_lifecycle_mutated
+    action: >-
+      Consume the target-aware projection refresh and its embedded verification returned
+      by record_reconciliation. Require CURRENT plus canonical, analytics, and Trade View
+      target visibility. The shared refresh also rebuilds the PropW Registration Census
+      from the existing normalized local ledger when available; it never calls the provider
+      API. Only if that result is absent, stale, or lacks target visibility, run the fallback
+      refresh below once and use its embedded verification. Never issue a separate local
+      projections verify immediately after a successful refresh.
+    fallback_command: python -m trading_os projections refresh --target-trade <trade_id>
+  - id: select_and_run_required_tests
+    condition: canonical_trade_or_lifecycle_mutated
+    action: >-
+      Classify the complete diff from the runtime-captured mutation base with the deterministic
+      lane selector. Run its exact focused targets only for DATA_ONLY_REGISTRATION;
+      empty, mixed, unknown, or system changes run every full_suite command above.
+      The successful run stores a file-content/mode manifest. If any file changes while
+      tests execute, the command fails and requires a new classification and test run.
+      Record the emitted elapsed time in the run telemetry receipt.
+    command: python -m trading_os registration-test-lane run --run-id <registration-run-id>
+  - id: verify_tested_diff_before_commit
+    condition: routine_record_lane
+    command: python -m trading_os registration-test-lane verify-tested-diff --run-id <registration-run-id>
+    action: >-
+      Stage the complete intended registration diff, then immediately before commit verify
+      the path/status/content/mode manifest still matches the successful test run and the
+      staged index exactly matches the tested worktree. On mismatch, do not commit; rerun
+      the selector and its required tests against the full current diff, then stage and verify again.
+  - id: persist_remote_main
+    condition: routine_record_lane
+    action: >-
+      Commit only after verify_tested_diff_before_commit succeeds. Immediately before push,
+      fetch origin/main, require it still matches the captured mutation base, and run
+      verify-tested-diff again. This confirms the committed index still matches the tested
+      diff. A changed diff blocks push until reclassification and the
+      selected required tests pass again. Then push origin/main and perform fresh-main
+      read-back. Record Git persistence elapsed time separately.
+  - id: return_receipt
+    action: >-
+      Return exact provider lifecycle, packet version, evidence SHA/locators, T-ID/trade_id
+      or blocked/reconfirmation status, lifecycle verification, projection verification,
+      remote-main read-back, and a run-only telemetry object containing the four separate
+      elapsed-seconds fields. Use null for any segment that could not be measured; do not
+      add timing fields to canonical trade records.
+
+completion:
+  REGISTERED_INCOMPLETE: >-
+    Same as REGISTERED except the Owner's verbatim words are missing or the Agent did not declare
+    both chart roles (agent_assessment.chart_roles) against saved images. The T-ID exists; the result carries a missing list. Never report this as REGISTERED.
+  REGISTERED: >-
+    The Owner's verbatim words and both charts are saved, and the frozen packet validated without semantic change; exact evidence is durably ingested;
+    provider identity and entry verification reached the required canonical lifecycle;
+    strategy attribution may be MATCHED, NO_MATCH, or unresolved with null identity;
+    plan may be partial; projections are current; origin/main contains the state and
+    fresh-main read-back succeeds.
+  STRATEGY_PENDING: >-
+    Legacy compatibility state for previously persisted pending attempts only. New unresolved
+    packets return READY_FOR_RECORD_RECONCILIATION and proceed through provider verification;
+    new LIVE registrations never enter STRATEGY_PENDING.
+  ALREADY_REGISTERED: >-
+    The provider lifecycle already maps to an existing canonical trade. Return and verify
+    the original T-ID; never create another.
+  OWNER_RECONFIRMATION_REQUIRED: >-
+    Provider facts, strategy/rule authority, resolver integrity, or another semantic input
+    differs from the frozen packet. No executor is authorized to repair the packet.
+  BLOCKED: >-
+    Integrity, evidence, identity, lifecycle, write-capability or repository preflight failed.
+    Do not mutate canonical trade state.
+
+# Not part of the normal one-command registration flow above.
+supplements:
+  record_chart_roles:
+    command: python -m trading_os registration-executor record-chart-roles --input <chart-roles-confirmation.v1.json>
+    when: >-
+      An already-registered trade needs its entry/exit chart judgment recorded or corrected
+      (for example REGISTERED_INCOMPLETE trades registered before the chart-role rule).
+    action: >-
+      A governed supplement, not an ALREADY_REGISTERED repair: the canonical trade and frozen
+      packet are untouched; one append-only chart_roles_recorded lifecycle event is written and
+      the derived views are always refreshed. The Agent judges which saved image is the entry or
+      exit chart, shows that judgment to the Owner in the chat, and only after the Owner's single
+      same-conversation confirmation generates the input file itself. The Owner never edits,
+      sees or runs it. Input: schema, trade_id, a stable source_id, confirmed_at (ISO time of the
+      confirmation) and chart_roles, a complete snapshot of entry_chart / exit_chart, each with
+      evidence_refs cited from images already saved on the trade and a rationale. A role left out
+      is withdrawn. The record states that the Agent attests the confirmation; it is not platform
+      identity verification. Saving a new image first still requires the normal evidence capture.
+    retry: same_source_id_and_content_is_idempotent; changed_content_under_the_same_source_id_is_rejected
+    persistence: after the local lifecycle write and projection refresh, run the registration test lane, commit only the supplement's changed routine artifacts, push origin/main, and complete exact remote read-back under the persistence rules above.
+    agent_must_not: [call_before_owner_confirmation, hand_the_owner_a_json_file_or_command, edit_canonical_trade_or_packet]
+  record_chart_roles_batch:
+    command: python -m trading_os registration-executor record-chart-roles --input <chart-roles-confirmation.v2.json>
+    when: >-
+      Several already-registered trades need their chart judgment recorded after the Owner
+      reviewed them together (a table in the chat is enough; the Owner need not confirm each trade
+      separately).
+    action: >-
+      Same writer, event and rules as record_chart_roles. Input schema chart-roles-confirmation.v2:
+      source_id, confirmed_at and items, each with trade_id and a complete chart_roles snapshot. All
+      items share one test run, one commit and one remote read-back, so a batch never costs one full
+      test suite per trade. A trade_id may appear only once in a batch.
+    retry: same_source_id_and_content_is_idempotent; changed_content_under_the_same_source_id_is_rejected
+    agent_must_not: [call_before_owner_confirmation, hand_the_owner_a_json_file_or_command, edit_canonical_trade_or_packet]
+  record_plan_r_correction:
+    command: python -m trading_os registration-executor record-plan-r-correction --input <plan-r-correction.v1.json>
+    r_calculation_source: REVIEW_RULES.md §4
+    chart_evidence_source: REVIEW_RULES.md §2
+    when: >-
+      An already-registered LIVE trade has an unknown or proxy plan and R, but an Owner
+      chart saved on the trade shows Entry, SL and TP (see REVIEW_RULES.md §2, §4).
+    action: >-
+      Appends one plan_r_corrected lifecycle event per trade (schema plan-r-correction.v1: source_id,
+      confirmed_at and items, each with trade_id and a chart of entry/stop/target, every price with
+      value, provenance chart_annotation or chart_estimate, and evidence_ref of an image already saved
+      on the trade). The writer recomputes planned_rr and realized_r from the trade's own fill and exit
+      with trading_os.live_chart_plan; a caller-asserted R that the chart does not produce is rejected.
+      The earlier plan and reported R stay in history; the latest correction is current and its R counts
+      as an ex-ante R in analytics. The Agent reads the prices, shows them with the resulting R to the
+      Owner in the chat and, only after the Owner's single same-conversation confirmation, generates the
+      input itself. A level the Agent cannot read is not corrected; it stays unknown.
+    retry: same_source_id_and_content_is_idempotent; changed_content_under_the_same_source_id_is_rejected
+    persistence: same lifecycle write, projection refresh, test lane, commit, push and remote read-back as the other supplements.
+    agent_must_not: [call_before_owner_confirmation, guess_an_unreadable_price, use_a_fixed_amount_as_one_r, hand_the_owner_a_json_file_or_command, edit_canonical_trade_or_packet]
+  record_owner_words_unrecoverable:
+    command: python -m trading_os registration-executor record-owner-words-unrecoverable --input <owner-words-unrecoverable.v1.json>
+    when: >-
+      Trades registered before the verbatim rule have only an Agent summary of what the Owner said.
+      A summary is never the Owner's words, so the Agent must not store it as one. The Owner decides in
+      the chat that these words cannot be recovered; the Agent then records that fact.
+    action: >-
+      Appends one owner_words_unrecoverable_recorded lifecycle event per trade (schema
+      owner-words-unrecoverable.v1: source_id, confirmed_at, reason, trade_ids; one batch, one commit).
+      It writes nothing into owner_statements and never completes a trade: the trade stays
+      REGISTERED_INCOMPLETE with missing owner_words. Registration Census lists it under
+      acknowledged_gaps and counts it in legacy_acknowledged_count only when every remaining gap is
+      acknowledged, so a known historical limitation is separated from work still to do. It is refused
+      for a trade that already has the Owner's verbatim words, and a later verbatim statement ends it.
+      The record states that the Agent attests the Owner's confirmation; it is not platform identity
+      verification.
+    retry: same_source_id_and_content_is_idempotent; changed_content_under_the_same_source_id_is_rejected
+    agent_must_not: [call_before_owner_confirmation, store_a_summary_as_owner_words, hand_the_owner_a_json_file_or_command]

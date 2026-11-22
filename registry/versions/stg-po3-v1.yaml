@@ -1,0 +1,158 @@
+version_id: stg-po3:v1
+rule_version: stg-po3:v1
+schema_version: strategy-rule-version.v1
+status: active
+strategy_id: stg-po3
+lifecycle_at_freeze: active
+classification: independent_system
+parent_strategy_id: null
+freeze_date: '2026-09-11'
+freeze_baseline_sha: '0000000000000000000000000000000000000000'
+authority_class: owner_authority_and_canonical_strategy_definition
+effective_from: null
+effective_to: null
+supersedes: null
+evidence_refs:
+- evidence_id: definition.po3
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier2_canonical_strategy_definition
+- evidence_id: trade.po3.2025-10-14
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.po3.2026-03-26
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.po3.2026-07-14
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+rule_surface:
+  identity: Synthetic example text; replace with your own strategy definition.
+  context: Synthetic example text; replace with your own strategy definition.
+  direction: Synthetic example text; replace with your own strategy definition.
+  timeframe: Synthetic example text; replace with your own strategy definition.
+  prerequisites: Synthetic example text; replace with your own strategy definition.
+  setup_sequence: Synthetic example text; replace with your own strategy definition.
+  entry_trigger: Synthetic example text; replace with your own strategy definition.
+  invalidation: Synthetic example text; replace with your own strategy definition.
+  target_exit: Synthetic example text; replace with your own strategy definition.
+  disqualifiers: Synthetic example text; replace with your own strategy definition.
+entry_logic:
+  mode: sequence
+  steps:
+  - accumulation
+  - manipulation
+  - distribution
+unresolved:
+- item_id: po3.session_timing
+  claim_class: CONTEXT
+  status: unresolved
+  blocking: false
+  eligibility_impact: false
+  decision_packet: Synthetic example text; replace with your own strategy definition.
+rules:
+- rule_id: po3.identity
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: po3
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule po3.identity.
+  evidence_refs:
+  - definition.po3
+  - trade.po3.2025-10-14
+  - trade.po3.2026-03-26
+- rule_id: po3.phase_sequence
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: po3_phase_sequence
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule po3.phase_sequence.
+  evidence_refs:
+  - definition.po3
+  - trade.po3.2026-03-26
+  - trade.po3.2026-07-14
+- rule_id: po3.directional_confirmation
+  category: confirmation
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: mss
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule po3.directional_confirmation.
+  evidence_refs:
+  - definition.po3
+  - trade.po3.2026-07-14
+- rule_id: po3.invalidation
+  category: risk
+  required: true
+  operator: exists
+  operands:
+    field: plan.stop_loss_price
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: RISK/INVALIDATION
+  statement: Synthetic example rule po3.invalidation.
+  evidence_refs:
+  - trade.po3.2026-03-26
+- rule_id: po3.target_liquidity
+  category: exit
+  required: true
+  operator: exists
+  operands:
+    field: plan.target_price
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: TARGET/EXIT
+  statement: Synthetic example rule po3.target_liquidity.
+  evidence_refs:
+  - trade.po3.2026-03-26
+- rule_id: po3.psar_confirmation
+  category: confirmation
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: psar
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule po3.psar_confirmation.
+  evidence_refs:
+  - definition.po3

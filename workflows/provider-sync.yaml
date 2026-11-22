@@ -1,0 +1,108 @@
+schema_version: provider-sync.workflow.v1
+workflow_id: provider_sync
+authority: trading-record
+status: r2_p2b_code_implemented_owner_data_refresh_pending
+owner_facing: true
+effect: PROJECT_RUNTIME_WRITE
+
+purpose: >-
+  Read-only fetch exchange executions and refresh the provider-native ledger
+  plus registration candidate census, without registering Owner trades or
+  running a review. Repeat syncs must not duplicate provider lifecycles.
+
+external_provider_access:
+  effect: READ_ONLY
+  methods: [GET]
+
+execution:
+  command: python -m trading_os provider-sync --fetch
+  git_persistence_opt_in: python -m trading_os provider-sync --fetch --commit --push
+  owner_review_pr_opt_in: python -m trading_os provider-sync --fetch --commit --push --create-pr
+  routine_direct_main: python -m trading_os provider-sync --fetch --commit --publish-main
+  owner: trading_os.provider_sync
+  normalized_identity: provider_plus_open_id
+  ledger_path: provider-ledgers/propw/normalized/trade-lifecycles.jsonl
+  candidate_path: provider-ledgers/propw/registration-census.json
+
+workflow:
+  - id: provider_fetch
+    action: Perform the existing GET-only PropW full-history sync, fail closed on auth, coverage, or malformed response.
+  - id: deterministic_ledger_upsert
+    action: Preserve stable open_id and provider event IDs; same identity and same facts produce no change.
+  - id: refresh_candidate_census
+    action: >-
+      Recompute the current census from the provider ledger and canonical
+      identity bindings. Provider lifecycle phase (OPEN, PARTIALLY_CLOSED,
+      CLOSED, UNKNOWN) is separate from registration status. Valid open and
+      partial rows remain selectable candidates. census --next stays
+      closed-only by default; --phase and --candidates opt into other phases.
+      The persisted census pins normalized ledger, canonical finalizations,
+      identity links and pending-state digests; canonical-only changes make it
+      stale until deterministic regeneration.
+  - id: persist_and_read_back
+    action: >-
+      Locally export and verify sanitized provider ledger and census. A
+      prepare-only invocation leaves generated read models untouched and
+      reports projection work as deferred, so a later --commit can complete
+      the flow. Before a committed sync, require clean canonical/registry
+      sources, committed bytes for every artifact locator consumed from the
+      existing analytics read model and canonical trade/lifecycle records, and
+      the lifecycle event log when its current projection schema is stale.
+      Clean generated projection destinations are required, including existing
+      ignored or untracked files. Commit/push only when
+      explicitly enabled on data/propw-ledger-YYYYMMDD. When current analytics
+      and health projections exist, compare analytics' provider-fee source pin
+      with the refreshed provider ledger. If it changed, run the existing full
+      projections refresh (analytics, health, Census, Trade View, handoff) and
+      include those generated read models in the data commit; when it did not
+      change, rebuild only the read-only Trade View Census slice. Routine path
+      (Owner-authorized 2026-11-07, no PR): --publish-main, run from a clean
+      checkout whose HEAD equals the freshly fetched origin/main, runs the same
+      checks, commits only the provider-owned and generated projection paths,
+      fast-forward pushes to main (never force) and reads origin/main back; a
+      stale, ahead or moved main fails closed. Code changes still go through an
+      independently reviewed PR. --create-pr
+      requires --push, opens or reports an Owner-reviewed PR to main, and never
+      merges. The main read-back workflow checks out the exact merged commit
+      and verifies the fresh Census and matching projection digests before
+      product visibility is reported.
+
+invariants:
+  never_allocate_t_id: true
+  never_start_review: true
+  never_modify_owner_rationale_or_images: true
+  canonical_registration_not_inferred_from_provider_presence: true
+  ambiguous_provider_identity: blocked
+  credentials_never_persisted: true
+  no_duplicate_lifecycle_on_retry: true
+  unknown_owner_evidence_does_not_block_provider_intake: true
+
+current_limits:
+  github_only_registration: committed_provider_ledger_only_no_credentialed_live_fetch
+  registration_preview_disclosure: last_successful_sync_at_plus_currentness_not_asserted
+  operator_action: >-
+    A GitHub-only Agent must show the recorded sync timestamp (or unknown), never claim
+    real-time exchange coverage from a fresh Census, and hand off missing IDs or
+    executions outside known sync coverage for credentialed local Sync before retrying.
+  automatic_main_publishing: routine_sync_may_fast_forward_main_with_publish_main_flag;_data_pr_remains_available
+  live_product_pending_list_refresh: requires_successful_main_readback_after_publish_main_or_owner_merge
+  trade_view_delivery: private_local_read_model;_no_public_deployment
+  open_only_normalization: valid_open_provider_phase_when_open_facts_are_complete
+  partial_close_selection: explicit_phase_or_candidates_option;_next_defaults_to_closed
+  census_freshness_fields: generated_at_and_source_digests_for_ledger_canonical_and_pending_state
+  stored_census_may_lag_canonical: detectable_as_stale_until_rebuilt
+  legacy_ok_without_explicit_provider_phase: unknown_until_ledger_refresh
+  registered_completion_requires_owner_words_entry_and_exit_charts: implemented_in_census_and_executor_as_REGISTERED_INCOMPLETE
+  note: >-
+    This flow does not call a remote Trade View deployment or merge a data PR.
+    Trade View remains private/local; only its main-backed read-model artifacts
+    and digest closure are verified. Owner registration evidence completeness
+    is outside this sync contract.
+
+acceptance:
+  router_examples:
+    - 刷新 PropW 帳本
+    - 同步交易所數據
+    - refresh PropW
+  read_only_lookup_example: 查 PropW 進出場
+  no_implicit_registration: true

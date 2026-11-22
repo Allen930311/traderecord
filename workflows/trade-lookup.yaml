@@ -1,0 +1,98 @@
+schema_version: trade-lookup.workflow.v1
+workflow_id: trade_lookup
+authority: trading-record
+effect: PROJECT_RUNTIME_WRITE
+
+external_provider_access:
+  effect: READ_ONLY
+  methods: [GET]
+
+runtime_write_scope:
+  - ingestion/propw/data/**
+
+purpose: >-
+  Resolve provider execution facts for an existing PropW trade without turning
+  screenshots, browser state, historical records, or canonical absence into
+  provider discovery evidence. The workflow may refresh only the git-ignored
+  local PropW read model; it does not write canonical Trading Record truth.
+
+natural_language_intents:
+  - 找交易
+  - 查交易
+  - 查進出場
+  - 今天還有哪筆交易
+  - 查 PropW
+  - 找 openId
+  - 2026-09-22應該還有一筆交易 可以幫我找出來他的進出場嗎
+  - find a trade
+  - lookup trade
+
+source_semantics:
+  propw_local_read_model: >-
+    First read surface for PropW execution facts. It is a normalized local cache
+    of read-only provider evidence, not canonical Trading Record truth.
+  canonical: >-
+    Trading Record truth used after provider lookup to determine whether the
+    provider lifecycle is already recorded or linked.
+  review_evidence: >-
+    Screenshots/ZIP/owner notes may supplement review context only; they do not
+    replace provider execution authority.
+
+freshness_contract:
+  coverage_model: full_history_through_successful_sync_finished_at
+  required_coverage_end: min(requested_end, as_of)
+  rule: >-
+    A successful full-history sync is fresh when sync_runs.finished_at is at or
+    after the required coverage end. Same-day lookups after an earlier sync are
+    stale; already-covered historical closed ranges are fresh.
+  owner: ingestion/propw/src/propw/freshness.py
+
+workflow:
+  - id: resolve_query
+    action: Resolve requested Taipei date/time range, instrument, direction, openId, and as_of.
+  - id: ensure_freshness
+    working_directory: ingestion/propw
+    command_template: >-
+      python -m propw ensure-fresh --date <YYYY-MM-DD>
+    action: >-
+      Execute the repository-owned freshness gate. It checks sync_runs; if stale
+      it performs exactly one read-only provider sync and verifies freshness
+      again. If already fresh it makes no provider request.
+    failure: BLOCKED
+  - id: query_trade_groups
+    working_directory: ingestion/propw
+    command_template: >-
+      python -m propw trades --date <YYYY-MM-DD> [--instrument <INSTRUMENT>] --json
+    action: Query the normalized local trade_groups only after ensure_freshness succeeds.
+  - id: compare_canonical
+    action: >-
+      Compare provider openId/lifecycle identity against canonical lifecycle and
+      durable identity links. Canonical absence is not proof that no provider
+      trade exists.
+  - id: return_results
+    action: >-
+      Return matching openId, instrument, direction, entry/exit timestamps and
+      prices, provider P&L when available, normalization status, and canonical
+      linkage/recording status.
+
+guards:
+  forbidden_before_provider_query:
+    - browser_ui
+    - HAR_search
+    - historical_trade_search
+    - screenshot_execution_inference
+  browser_or_har_fallback: forbidden
+  on_sync_failure: >-
+    Return BLOCKED with the concrete provider/sync diagnostic. Do not route
+    around the failure through browser UI, HAR, screenshots, or history.
+  on_no_rows: >-
+    Return NOT_FOUND for the requested provider query. Do not invent a match
+    from canonical/history/review evidence.
+
+acceptance:
+  golden_utterance:
+    input: "2026-09-22應該還有一筆交易 可以幫我找出來他的進出場嗎"
+    expected_route: trade_lookup
+  behavioral_tests:
+    - ingestion/propw/tests/test_freshness.py::test_stale_current_day_syncs_exactly_once_then_query_uses_refreshed_db
+    - ingestion/propw/tests/test_freshness.py::test_fresh_historical_range_skips_sync_and_queries_local_db

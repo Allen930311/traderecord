@@ -1,0 +1,888 @@
+schema_version: trade-registration.workflow.v1
+workflow_id: trade_registration
+authority: trading-record
+status: operational
+effect: PROJECT_RUNTIME_WRITE
+
+purpose: >-
+  Register one real owner trade into canonical Trading Record truth. Registration may
+  reconstruct a retrospective trade from provider execution facts, owner-supplied chart
+  evidence, explicit agent visual analysis, and owner recollection. It is not portfolio
+  review or performance analysis.
+
+blocked_conditions_reference: workflows/blocked-conditions-index.yaml
+
+architecture:
+  kind: workflow_over_existing_system
+  new_state_model: false
+  provider_lookup_workflow: workflows/trade-lookup.yaml
+  execution_workflow: workflows/registration-execution.yaml
+  canonical_record_workflow: workflows/record-reconciliation.yaml
+  lifecycle_authority: trading_os.operational_lifecycle.LifecycleStore
+  evidence_store: trading_os.evidence_store.EvidenceStore
+  strategy_authority: registry/strategy-registry.yaml
+  retrospective_attribution_authority: registry/retrospective-attribution.yaml
+
+authority_invariants:
+  canonical_policy_source: AUTHORITY.md
+  canonical_chart_reading_source: REVIEW_RULES.md §2
+  evidence_provenance_is_not_evidence_admissibility: true
+  authority_domains_are_distinct:
+    provider_execution_truth: provider_evidence
+    owner_historical_intent: retrospective_owner_attestation
+    chart_observations_and_consistency_checks: agent_visual_observation
+  evidence_time_fields:
+    provenance_capture_mode: original_capture_or_retrospective_replay_or_provider_generated_or_unknown
+    captured_at: when_the_artifact_was_created_if_observable
+    represented_market_time: historical_market_interval_shown_if_observable
+    timing: true_evidence_timing_relative_to_trade
+  retrospective_replay_policy:
+    admissible_for_historical_reconstruction: true
+    must_remain_review_post_trade: true
+    contemporaneous_screenshot_required: false
+    unknown_chart_chronology_is_a_contradiction: false
+
+external_provider_access:
+  effect: READ_ONLY
+  methods: [GET]
+
+canonical_mutation:
+  mode: delegated_only
+  entry_workflow: registration_execution
+  internal_record_workflow: record_reconciliation
+  direct_record_reconciliation_route: forbidden
+
+authority_model:
+  provider_truth:
+    owns:
+      - provider_lifecycle_identity
+      - instrument
+      - direction
+      - entry_exit_timestamps
+      - entry_exit_prices
+      - provider_pnl
+      - provider_close_state
+  owner:
+    owns:
+      - historical_entry_rationale
+      - retrospective_primary_strategy_and_entry_expression
+      - remembered_original_plan_facts_when_explicitly_recalled
+      - classification_of_trigger_versus_confluence
+      - whether_the_owner_considers_the_actual_entry_to_have_a_setup
+      - present_day_setup_judgment
+    rule: >-
+      Owner attestation is first-class evidence for the Owner's remembered historical intent.
+      It is not provider execution authority and must not override provider facts or material
+      chart-timeline contradictions. An explicit no-setup attestation is NO_MATCH; a positive
+      attestation requires an active frozen strategy identity. Entry expression is optional;
+      when the selected strategy defines that dimension, any supplied expression is mapped
+      through its active frozen rule and retrospective expression registry.
+      An Agent may observe and check consistency but may not replace the Owner's intent.
+    resolver_input_for_historical_intent:
+      field: owner_attestation
+      required_shape:
+        timing: retrospective
+        setup_status: HAS_SETUP_or_NO_SETUP
+        rationale: non_empty_owner_statement
+        evidence_refs: refs_to_attached_evidence_when_present
+      positive_setup_fields:
+        primary_strategy_id: required_active_registry_identity
+        entry_expression: optional_and_allowed_only_when_defined_by_active_frozen_strategy
+        entry_triggers: optional_owner_attested_components
+        confluences: active_strategy_ids_or_governed_context_ids_with_distinct_types
+        plan_facts: optional_owner_recalled_values
+      no_setup_fields:
+        setup_status: NO_SETUP
+        primary_strategy_id: omitted
+      registry_mapping_required: true
+      arbitrary_strategy_identity_bypass: forbidden
+      expression_component_mapping: registry_driven_no_resolver_hard_coding
+      strategies_without_expression_dimension: do_not_invent_or_require_expression
+      chart_provenance_relabeling: forbidden
+      material_visual_or_plan_conflict: unresolved_and_owner_clarification_required
+      absent_or_unobservable_chart_timing: not_a_contradiction
+      contradiction_requirements:
+        contradiction_code: required
+        observed_fact: required_and_owner_facing
+        evidence_refs: required_and_must_bind_to_attached_visual_or_provider_evidence
+        trigger_after_provider_entry: requires_observed_at_after_provider_verified_entry_time
+  agent:
+    owns:
+      - direct_visual_observations
+      - evidence_grounded_assessment
+    must_not_override_owner_setup_attribution: true
+  strategy_resolver:
+    owns:
+      - mapping_confirmed_setup_facts_to_registry_identity
+      - checking_retrospective_owner_attestation_against_visual_and_provider_facts
+    does_not_own:
+      - provider_execution_truth
+      - whether_the_owner_had_an_entry_rationale
+      - overriding_explicit_owner_no_setup_adjudication
+      - replacing_owner_primary_strategy_with_a_visible_confluence
+
+evidence_timing_contract:
+  canonical_policy_source: AUTHORITY.md
+  artifact_provenance:
+    timing: true_capture_timing_relative_to_trade
+    retrospective_replay:
+      category: review
+      timing: post_trade
+      type: replay_chart
+      provenance_capture_mode: retrospective_replay
+      role: historical_market_reconstruction
+  retrospective_authority:
+    schema: first_class_owner_attestation_plus_retrospective_observations
+    authority_source: workflows/record-reconciliation.yaml
+    contradiction_policy: material_contradiction_keeps_attribution_unresolved
+    unknown_chronology: not_a_contradiction
+  retrospective_rule_fact_projection:
+    derived_from:
+      - validated_owner_attestation
+      - frozen_strategy_and_rule_version
+      - corroborating_retrospective_observations
+      - truthful_attached_replay_evidence
+      - no_material_contradiction
+    schema: retrospective-rule-facts.v1
+    fields: [supports_fact_timing, basis, exact_evidence_refs, source_claim_ids]
+    authority_pins: [strategy_id, rule_version, retrospective_attribution_registry_version, retrospective_attribution_registry_digest]
+    owner_supplies_second_rule_attestation: false
+  forbidden:
+    - relabel_retrospective_replay_as_pre_trade
+    - substitute_capture_time_for_represented_market_time
+    - infer_missing_historical_facts
+    - accept_a_parallel_statement_shaped_owner_attestation
+
+# Agent-only preparation substep for LIVE plan/R; this is NOT a new Owner SOP or Writer.
+live_chart_plan_r:
+  r_calculation:
+    canonical_source: REVIEW_RULES.md §4
+    chart_evidence_source: REVIEW_RULES.md §2
+    implementation: trading_os.live_chart_plan.derive_live_chart_plan
+    summary: >-
+      Every Owner-supplied chart is the plan; 1R is the actual filled entry to chart
+      SL distance (never a fixed amount, moved/final stop, position size, or P&L).
+      See REVIEW_RULES.md §4 for exact planned_rr and realized_r formulas.
+  helper: trading_os.live_chart_plan.derive_live_chart_plan
+  realized_r_authority: deterministic_execution_calculation
+  price_fields: [entry, stop, target]
+  each_price: [value, provenance, evidence_ref]
+  unreadable_level: >-
+    First inspect all Owner charts and previously stated/confirmed plan values once for
+    ALL THREE planned price levels (Entry, Original SL, TP) and owner_recollection
+    (verbatim_text), before calling resolve_strategy or prepare_confirmation_preview.
+    Missing Original SL blocks 1R, planned_rr, and realized_r; missing Chart TP blocks
+    planned_rr and target_capture; missing Chart Entry omits planned intended_entry
+    separation (intended_entry vs Provider fill). If any subset of {Entry, Original SL, TP}
+    and/or owner_recollection.verbatim_text is still unreadable or missing, batch ALL
+    missing questions into ONE single combined Owner chat prompt before resolve_strategy
+    and prepare_confirmation_preview (avoiding repeated Owner prompts and repeated previews).
+    Explicitly ask in chat for the original stop-loss price when SL is missing, not a
+    moved/protective/final stop, and never ask the Owner for JSON, CLI, or a digest.
+    Do not jump to BLOCKED, an arbitrary stop, or Owner-attested R as a shortcut. On
+    Owner-supplied levels, populate intended_entry, stop_loss, take_profit and derive
+    planned_rr and realized_r from verified Provider fills prior to preview (recomputing
+    and reconfirming if updated after an earlier preview). If the Owner explicitly states
+    they cannot recall Entry or TP, leave those fields "unknown" (partial LIVE plan)
+    without guessing or blocking OPEN registration. Only when the Owner explicitly states
+    they cannot recall the original SL may the Agent record
+    owner_judgment.original_sl_unavailable_confirmed: true and keep stop_loss "unknown".
+    For an already CLOSED trade, only an explicitly Owner-attested numeric R or governed
+    manual adjudication may then permit registration; otherwise BLOCKED after asking,
+    without guessing.
+
+# Agent-only follow-up for BACKTEST; NOT a new Owner SOP or Writer. Source: Owner decision
+# 2026-11-22 (a BACKTEST is judged from the Replay chart, so the Owner's chart reading of the
+# exit must be able to close the sample and make it count). Replaces the old rule that an
+# image-registered BACKTEST stays OPEN forever; LIVE exit verification is unchanged.
+backtest_chart_exit:
+  applies_only_to: [BACKTEST]
+  default_path: "Put the exit in the registration intake (exit: {price, closed_at, realized_r only if the stop is unknown} plus an exit_chart image). The same preview digest and the same single Owner approval then register, close and verify the sample (owner_attestation), so it counts at once; commit --publish covers it and reads the verification back from origin/main. This replaces register-then-backtest-exit for new samples (Owner decision 2026-11-22: the two-step flow left OPEN, uncounted samples)."
+  this_separate_step_is_only_for: a later or corrective exit on an already registered OPEN sample (or an identical retry of the intake with the exit added)
+  when: the Owner (or the registered replay_timing) says how the sample ended on the chart
+  execution_service: trading_os.backtest_exit (preview_backtest_exit -> Owner chat approval -> commit_backtest_exit)
+  local_agent_entry: python -m trading_os backtest-exit preview|commit --trade-no BT... --exit-price ... --closed-at ... --exit-evidence-ref artifact:...
+  steps:
+    - "Agent reads the exit chart and proposes exit price and time; the Owner confirms them in chat."
+    - "preview derives realized R from the registered entry, stop and the confirmed exit price (Owner states R only when the stop is unknown)."
+    - "closed_at must equal the Owner-confirmed replay exit_at when one is recorded."
+    - "One Owner approval, then commit: final_close, verify_exit(owner_attestation) bound to the saved exit Replay image, projection refresh, read-back."
+  authority: owner_attestation; the exit is an Owner chart judgment, never a provider fill or provider P&L
+  evidence: the exit image stays category review / post_trade / replay_chart; analytics accepts that exactly bound, durable, hash-verified image as strict BACKTEST evidence (entry and exit)
+  counted_in: BACKTEST population only (summary_by_mode.backtest); LIVE and combined populations are unchanged and BACKTEST is still never merged into LIVE statistics
+  forbidden: [writing exit by hand-built lifecycle calls, closing without an Owner-confirmed exit price, treating a target area on the chart as an exit without the Owner confirming it]
+
+# Agent-only preparation substep for BACKTEST; this is NOT a new Owner SOP or Writer.
+backtest_image_first_intake:
+  replay_timing_checklist:
+    - "(a) Times known at registration: include replay_timing; preview shows entry, exit and timezone."
+    - "(a) Get one Owner approval, then run commit --publish once."
+    - "(b) Adding times to an existing BT: reuse the same intake and identical images, plus replay_timing."
+    - "(b) ALREADY_REGISTERED appends only the timing event."
+    - "Never write a temp script, call record_backtest_timing by hand, or run a second publish."
+  schema_version: backtest-chart-intake.v1
+  helper: trading_os.backtest_chart_intake.prepare_backtest_chart_intake
+  applies_only_to: [BACKTEST]
+  owner_input: images_plus_owner_rationale_in_normal_chat
+  agent_interprets_chart: true
+  default_for_missing_backtest_prices:
+    priority: [owner_explicit, chart_annotation, chart_estimate, unknown]
+    requires_evidence_ref_for_chart_value: true
+    no_manual_owner_number_entry_required: true
+  format:
+    price_fields: [entry, stop, target]
+    each_price: [value, provenance, evidence_ref]
+    calculated_metric: planned_rr_from_chart
+    image_roles: [entry_chart, exit_chart]
+    preserve_owner_verbatim: true
+    preserve_unknown_simulated_entry_at: true
+    outcome_reached_target_is_not_execution_fill: true
+  execution_service: trading_os.backtest_registration (preview_backtest_registration -> Owner chat approval -> commit_backtest_registration)
+  local_agent_entry: python -m trading_os backtest-registration preview|commit --intake <file>
+  github_only_agent_entry: github-agent-backtest-request.v1 backtest_preview / backtest_commit on the image-intake branch (shared Runner)
+  required_extra_field: instrument
+  image_paths: registration-intake/<case>/<original-filename> or Research/<...>; read from the checkout as source bytes, copied into canonical/evidence/artifacts/ (the originals are not committed by publish; after a confirmed origin/main publish and remote read-back, the local case folder may be deleted once every image sha256 matches the EvidenceStore copy on origin/main)
+  duplicate_policy: same strategy + same original image bytes is the same sample; identical retry writes nothing
+  possible_duplicate_policy: >-
+    Same strategy, same underlying (ETH = ETHUSDT), same direction and same entry price as a
+    registered BT, not told apart by a known entry time or a known stop, previews as
+    POSSIBLE_DUPLICATE (possible_duplicates lists the BT numbers) and commit refuses. Show the
+    Owner the existing BT and ask whether this is the same trade. Only if the Owner says it is a
+    different sample, add distinct_from: [exactly those BT numbers, no others] to the intake,
+    preview again and get the normal approval with distinct_from_confirmed: [the same numbers];
+    the decision is part of the preview digest. distinct_from cannot be added before the
+    Owner has seen the POSSIBLE_DUPLICATE preview.
+  already_registered_plan_policy: >-
+    The same original images are one sample (BT identity is strategy + image bytes), even if the
+    Agent now reads other prices from them. When status is ALREADY_REGISTERED and
+    existing_plan_matches is false, do not report a successful new registration: tell the Owner the
+    images are already BT000xxx with a different entry/stop/target, and that a second sample needs
+    a genuinely different replay image (changing the prices alone cannot create one).
+  execution_policy:
+    writer: existing_EvidenceStore_and_LifecycleStore_only
+    never_label_chart_estimates_as_provider_fills: true
+    owner_chat_confirmation_required: true
+    no_fake_execution_time: true
+    do_not_count_planned_R_as_realized_R: true
+    chart_estimate_preview_can_be_complete_while_canonical_execution_is_unverified: true
+
+owner_confirmation_gate:
+  required_before_canonical_trade_mutation: true
+  evidence_ingest_before_confirmation_allowed: false
+  presentation_must_include:
+    - provider_facts
+    - image_evidence
+    - agent_observation
+    - agent_assessment
+    - owner_recollection
+    - owner_judgment
+    - agreed_facts
+    - unresolved_facts
+    - strategy_resolution
+  confirmed_packet_semantics: frozen
+  change_rule: >-
+    If semantic interpretation changes after confirmation, return to owner confirmation
+    and freeze a new packet version before any trade draft/identity/T-number mutation.
+
+execution_routing:
+  mode: capability_based
+  named_agent_dependency: forbidden
+  write_capability_means: >-
+    The current agent has authorized access to execute the Project-owned runtime write lane,
+    including canonical mutation, git persistence to origin/main, and fresh-main read-back.
+  branches:
+    write_capable:
+      action: continue_directly_to_registration_execution
+      execution_workflow: workflows/registration-execution.yaml
+      handoff_required: false
+    not_write_capable:
+      action: emit_frozen_handoff_and_evidence_package
+      handoff_required: true
+      receiver_requirement: any_authorized_write_capable_agent
+      receiver_entry_workflow: workflows/registration-execution.yaml
+  receiving_agent_contract: >-
+    Consume the owner-confirmed frozen Registration Packet as semantic input. Validate
+    integrity, provenance, current provider/canonical state, and executable contracts;
+    fail closed on mismatch. Do not redo the trade review, replace owner judgment, or
+    reinterpret the confirmed strategy resolution.
+
+natural_language_intents:
+  - 登記交易
+  - 幫我登記這筆交易
+  - 記錄這筆交易
+  - 紀錄這筆交易
+  - 補登交易
+  - 把以前沒記的交易補起來
+  - 下一筆
+  - register this trade
+  - record this trade
+  - backfill this trade
+
+owner_facing_definition:
+  means: >-
+    Turn one real execution into durable canonical truth by combining provider truth,
+    preserved chart evidence, agent chart analysis, and owner-reported entry rationale.
+  does_not_mean:
+    - performance review across already-registered trades
+    - strategy ranking
+    - strategy promotion or rule mutation
+
+batch_policy:
+  default_grouping: instrument
+  within_group_order: entry_time_ascending
+  rationale: minimize chart-symbol switching during historical registration
+  ambiguous_or_partial_provider_lifecycle: hold_separately
+
+invariants:
+  - Provider entry, exit, timestamps, direction, lifecycle id, and P&L come from provider read-only evidence, never from screenshots.
+  - Every owner-supplied image is first-class evidence. Before Owner confirmation, Agent only reads/hashes exact original bytes without mutating the repository; following confirmation, the authorized registration executor validates and ingests the same bytes before canonical trade mutation. A non-write-capable agent may carry exact bytes and manifest in the governed evidence handoff for an authorized receiving agent.
+  - Every owner-supplied chart image must be visually inspected by the agent before strategy resolution or owner adjudication.
+  - Agent observations, agent assessment, and owner recollection/judgment are separate facts.
+  - Describe only observable chart facts; preserve unclear items as unknown or not_observable.
+  - Owner recollection may explain historical entry rationale but must not rewrite provider execution facts.
+  - Explicit owner setup attribution governs the owner's own historical intent — an owner-confirmed "actual entry had no setup" must be represented as NO_MATCH and must not be downgraded to INSUFFICIENT_EVIDENCE merely because an agent cannot visually reconstruct a setup.
+  - Agent visual analysis remains mandatory for chart evidence, but it records visible facts and may not overrule explicit owner attribution of the owner's own entry rationale/setup.
+  - No trade draft, identity link, T-number, or other canonical trade mutation may occur before the owner confirms the complete interpretation and the Registration Packet semantic state is frozen.
+  - After owner confirmation, downstream execution may validate and fail closed, but it must not silently reinterpret owner rationale, owner judgment, agreed facts, or strategy resolution.
+  - Workflow routing is capability-based and must never require a particular named agent.
+  - Strategy identity is produced only by the mandatory resolver (`python -m trading_os resolve --observations <file>`, trading_os/strategy_resolver.py). It accepts frozen-rule observations or a first-class retrospective `owner_attestation`; positive strategy/expression assertions must map to the active frozen registry. Callers may not bypass the registry by asserting an arbitrary strategy ID.
+  - Evidence provenance is not evidence admissibility. Frozen rule observations retain their timing requirements; a separate `retrospective_observations` lane can use truthful post_trade replay evidence to corroborate or contradict an owner_attestation without claiming the images are pre_trade.
+  - Resolver outcomes are MATCHED, NO_MATCH, AMBIGUOUS, or INSUFFICIENT_EVIDENCE. Only MATCHED and NO_MATCH are resolved; NO_MATCH (a real off-strategy trade, persisted as strategy_resolution.status=no_match, stats-ineligible) must never be confused with unresolved attribution. AMBIGUOUS / INSUFFICIENT_EVIDENCE are saved as `strategy_resolution.status=unresolved` with null identity and do not block a provider-verified LIVE T-ID.
+  - Do not infer FOMO, discipline, revenge, psychology, intent, or motive unless the owner explicitly states it.
+  - Canonical rule_compliance is compliant, violation, unknown, or not_observable; rule_violation is derived only.
+  - Registration writes canonical state only through record_reconciliation and existing lifecycle gates.
+  - Strategy attribution is not a registration gate. LIVE `create_draft` / `finalize` require a valid resolver-produced attribution object, which may be `unresolved` with null identity; only provider identity and entry verification authorize T-ID allocation. Callers may not assert a strategy_id/rule_version. BACKTEST/PAPER strategy contracts remain unchanged.
+  - LIVE plan fields may be `unknown`, `not_observable`, or null. Store the values unchanged and derive `plan.completeness` as `partial`; do not infer them from execution facts. Missing chart evidence does not itself block a T-ID, but an already-CLOSED trade still needs a valid numeric realized R (deterministic from chart stop + provider fills, explicit Owner attestation, or governed manual adjudication). Without one, return BLOCKED before ingest or canonical mutation; retain verified provider P&L only in the ledger, never fabricate R. A durable trade missing words or chart roles is REGISTERED_INCOMPLETE, not a new candidate.
+  - Registration never executes post-trade review. LifecycleStore.review() is the single canonical review writer and is reached only through workflows/single-trade-review.yaml (trading_os/trade_review.py), which accepts already-registered trades only.
+  - Descriptive performance belongs to workflows/performance-analysis.yaml. Cross-trade strategy diagnosis belongs to workflows/strategy-health-check.yaml.
+
+evidence_preservation_contract:
+  required_when_images_present: true
+  store: trading_os.evidence_store.EvidenceStore
+  preserve_exact_original_bytes: true
+  content_addressed_by_sha256: true
+  before_analysis:
+    required: [exact_original_bytes, sha256, original_filename]
+  repository_ingest:
+    required_before_canonical_trade_mutation: true
+    write_capable_agent: after_owner_confirmation_via_registration_executor_only
+    non_write_capable_agent: package_exact_bytes_and_manifest_for_receiver
+  required_artifact_metadata:
+    - sha256
+    - locator
+    - media_type
+    - byte_size
+    - original_filename
+  packet_image_evidence_contract:
+    type: list
+    identity_key: sha256
+    common_required:
+      - sha256
+      - original_filename
+    same_agent:
+      required:
+        - locator
+      validation: >-
+        Every packet image must resolve to the same SHA/locator/original filename in
+        EvidenceStore, and the stored bytes must re-hash to the packet SHA.
+    external_handoff:
+      required_one_of:
+        - package_path
+        - zip_path
+        - path
+      validation: >-
+        The frozen packet owner-image identity set must equal the owner-image set in the
+        handoff manifest. A manifest image absent from image_evidence, a packet image absent
+        from the manifest, or any SHA/path/original-filename mismatch is BLOCKED.
+  ingest_original_command: python -m trading_os evidence ingest --file <owner_image>
+  provenance_rule: >-
+    Binding category/timing follows actual provenance, not visual appearance. A screenshot
+    created now for historical reconstruction is review/post_trade. A genuinely original
+    pre-trade or execution-time image keeps its true historical category/timing.
+  historical_reconstruction_default:
+    category: review
+    timing: post_trade
+    type: chart_snapshot
+  retrospective_live_facade_guard: >-
+    Historical reconstruction/replay images MUST NOT be passed through
+    capture retrospective-live --chart-file because that facade binds chart-file as
+    pre_trade_context. Only AFTER Owner confirmation, the existing Executor must
+    ingest the exact image as review/post_trade through EvidenceStore; it must not
+    pass that reconstruction image via retrospective-live --chart-file. The Executor
+    attaches the same SHA/locator to the resulting trade after capture.
+  historical_reconstruction_attach_command: >-
+    python -m trading_os evidence ingest --file <same_owner_image> --trade-id <trade_id>
+    --category review --timing post_trade --type chart_snapshot
+  identity_rule: >-
+    The attached review artifact must resolve to the same SHA256 and locator produced by
+    the post-confirmation Executor ingest. Re-ingest is only an idempotent dedupe of identical bytes.
+  derivative_rule: >-
+    Cropped, annotated, recompressed, converted, or otherwise derived images may be stored
+    as additional evidence but never replace the exact original owner image.
+  gates:
+    image_present_and_original_bytes_or_sha_not_preserved_before_analysis: BLOCKED
+    canonical_trade_mutation_and_original_not_durably_ingested: BLOCKED
+    review_image_bound_as_pre_trade_context_without_true_pre_trade_provenance: BLOCKED
+    attached_artifact_identity_differs_from_original_ingest: BLOCKED
+    registration_packet_missing_image_sha256_or_locator: BLOCKED
+    registration_packet_image_set_differs_from_external_manifest: BLOCKED
+    same_agent_packet_image_missing_from_evidence_store: BLOCKED
+
+visual_analysis_contract:
+  required_when_images_present: true
+  analyze_every_image: true
+  required_observations:
+    - image_timeframe_if_visible
+    - visible_price_structure
+    - visible_liquidity_or_levels
+    - visible_indicator_or_strategy_labels
+    - actual_entry_relation_to_visible_structure
+    - actual_exit_relation_to_visible_structure_when_shown
+    - legibility_limits_and_uncertainties
+  output_separation:
+    agent_observation: direct visual facts
+    agent_assessment: strategy/context interpretation grounded in those facts
+    owner_recollection: owner's description of what they believed or why they entered at the time
+    owner_judgment: owner's present-day correction or conclusion
+    agreed_facts: facts accepted for canonical projection
+    unresolved_facts: disagreements or facts that remain unknown
+  gates:
+    screenshot_present_and_agent_visual_observation_missing: BLOCKED
+    owner_conclusion_without_agent_visual_analysis: BLOCKED
+    unclear_image_detail: preserve_unknown
+    owner_explicit_no_setup: authoritative NO_MATCH input; agent must not reopen setup existence
+    strategy_not_recognizable_without_owner_adjudication: resolver NO_MATCH requires the existing resolver evidence contract
+    strategy_evidence_insufficient_or_ambiguous: strategy attribution is not a registration gate; register the verified LIVE trade with unresolved attribution, then a later positive historical attestation can resolve through the registry-backed retrospective path
+    retrospective_material_contradiction: keep strategy attribution unresolved and ask only about the conflicting fact
+    retrospective_timing_not_observable: owner attestation may resolve at reduced confidence; do not treat missing chronology evidence as a contradiction
+    provider_verified_entry: allocate the canonical T-number even when attribution is unresolved, the chart is missing, replay evidence is retrospective, or the plan is partial
+
+registration_packet:
+  durable_form: canonical/registration/packets/<packet_sha256>.json
+  handoff_form_when_no_write_capability: frozen_packet_plus_evidence_zip
+  runtime_module: trading_os.registration_packet
+  freeze_command: python -m trading_os registration-packet freeze --input <confirmed-draft.json> --output <frozen-packet.json> --transport-mode <same_agent|external_handoff>
+  executor_input:
+    schema: registration-executor-input.v1
+    runtime_module: trading_os.registration_executor
+    command: python -m trading_os registration-executor run --input <registration-executor-input.json>
+    packet_field: registration_packet
+    packet_accepts: [owner_confirmed_draft, owner_confirmed_frozen_packet]
+    frozen_capture_field: canonical_capture
+    confirmation_scope: >-
+      canonical_capture is part of the Owner-confirmed semantic input and packet SHA.
+      The executor never fills or changes plan, timeframe, market context, thesis or R values.
+    required_capture_fields:
+      - intended_entry
+      - stop_loss
+      - take_profit
+      - planned_rr
+      - timeframe_context
+      - timeframe_trigger
+      - market_context
+      - thesis
+      - execution_environment
+      - outcome_known_at_recording
+    closed_trade_fields: [realized_r, realized_r_authority]
+    evidence_transport_fields: [evidence_manifest, evidence_root, image_files]
+    source_main_pin: >-
+      If a structured draft has no source_main_sha, the executor pins the exact fetched
+      mutation base when it builds the frozen packet. Existing frozen packet pins are preserved.
+  format: json
+  confirmation:
+    required: true
+    semantic_state_after_confirmation: frozen
+    schema_version: registration-packet.v2
+    required_metadata:
+      owner_confirmation: [status, confirmed_at, preview_digest]
+      packet: [packet_version, semantic_state, packet_sha256, transport_mode]
+      authority_pins:
+        - provider_lifecycle_key
+        - source_main_sha
+        - strategy_registry_digest
+        - strategy_version_pin
+        - resolver_version
+      conditional_authority_pins:
+        owner_attestation_present:
+          - retrospective_attribution_registry_digest
+  evidence_binding:
+    category: review
+    timing: post_trade
+    type: manual_note
+  required_sections:
+    - provider_facts
+    - image_evidence
+    - agent_observation
+    - agent_assessment
+    - owner_recollection
+    - owner_judgment
+    - agreed_facts
+    - unresolved_facts
+    - resolver_input
+    - strategy_resolution
+    - authority_pins
+    - canonical_review_projection
+    - research_hypotheses
+  canonical_review_projection:
+    allowed_fields:
+      - what_went_well
+      - what_went_wrong
+      - rule_compliance
+      - execution_deviation
+      - thesis_validity
+      - entry_quality
+      - exit_quality
+      - evidence_completeness
+      - owner_notes
+      - review_status
+      - diagnostic_class
+    mapping_rules:
+      rule_compliance: agreed rule observability/compliance only
+      diagnostic_class: agreed observable diagnosis only
+      entry_quality: agreed setup/entry conclusion
+      execution_deviation: agreed observable execution deviation
+      exit_quality: agreed exit conclusion
+      thesis_validity: agreed thesis conclusion when observable
+      evidence_completeness: summarize provider/chart/recollection evidence coverage
+      what_went_well: agreed positive observations only
+      what_went_wrong: agreed negative observations only
+      owner_notes: concise owner-reported context; no inferred psychology
+    noncanonical_packet_fields:
+      - provider_facts
+      - image_evidence
+      - agent_observation
+      - agent_assessment
+      - owner_recollection
+      - owner_judgment
+      - agreed_facts
+      - unresolved_facts
+      - strategy_resolution
+      - research_hypotheses
+    noncanonical_persistence: >-
+      Keep the full registration packet as review evidence; never pass these fields
+      verbatim to LifecycleStore.review().
+    strategy_resolution_rule: >-
+      Strategy resolution uses the existing historical strategy-resolution path/fields
+      where supported; it is not a LifecycleStore.review payload field.
+    research_hypothesis_rule: >-
+      Research hypotheses remain evidence/research candidates only and are never inserted
+      into LifecycleStore.review() or promoted into the strategy registry by registration.
+
+  authority_pins:
+    canonical_source: workflows/trade-registration.yaml#registration_packet.confirmation.required_metadata
+    summary: Pin names match confirmation.required_metadata (authority_pins and conditional_authority_pins).
+    resolver_input_rule: >-
+      Preserve the exact resolver input used before owner confirmation. Downstream execution
+      may replay only this exact frozen input for integrity; it may not add observations.
+  transport_mode:
+    required_before_freeze: true
+    allowed: [same_agent, external_handoff]
+    immutable_after_freeze: true
+    external_handoff_is_runtime_enforced: true
+  external_handoff_package:
+    required_when_current_agent_not_write_capable: true
+    required:
+      - frozen_registration_packet
+      - packet_sha256
+      - evidence_manifest
+      - evidence_manifest_sha256
+      - exact_original_evidence_bytes
+      - per_artifact_sha256
+      - original_filenames
+    mutation_rule: >-
+      The package is transport only. The receiving write-capable agent must not modify the
+      packet or evidence bytes to make validation pass.
+
+  confirmation_preview:
+    command: >-
+      python -m trading_os registration-packet prepare-confirmation --intake <registration-intake.json>
+      or --input <draft.json> [--image-file <sha256>=<path>]
+      [--manifest <manifest.json> --evidence-root <dir>]
+    timing: after_image_analysis_owner_recollection_and_before_owner_confirmation
+    mode: one_read_only_call_per_unchanged_draft
+    compact_intake:
+      schema: registration-intake.v1
+      requires_agent_or_owner_semantics: [canonical_capture, resolver_input, owner_recollection, agent_observation, agent_assessment]
+      raw_images_require: [alias, path, category, timing, type]
+      image_reference_form: image:<alias>
+      deterministic_derivations: [Provider_facts, image_SHA256, byte_size, original_filename, Registration_Packet_plumbing]
+      claim_mapping_rule: >-
+        Only explicit image:<alias> references are mapped to the exact raw-image SHA. Never infer
+        which screenshot supports a claim; preserve Owner rationale and unknowns verbatim.
+    performs:
+      - fetch_origin_main_once_and_reuse_or_create_one_safe_fresh_main_worktree
+      - preserve_the_callers_tracked_untracked_and_staged_changes
+      - read_current_provider_facts_and_registration_identity
+      - validate_exact_same_agent_image_bytes_or_external_handoff_manifest_and_bytes
+      - run_the_existing_strategy_resolver_once
+      - pin_current_registry_resolver_and_provider_authorities_in_the_preview
+      - return_short_owner_confirmation_text_and_exact_supporting_detail
+      - bind_the_semantic_snapshot_and_external_manifest_SHA_to_preview_digest
+    does_not:
+      - confirm_owner_intent
+      - freeze_or_persist_a_registration_packet
+      - create_a_trade_draft_identity_link_or_T_ID
+      - change_canonical_or_projection_state
+      - bypass_existing_executor_or_create_a_second_writer_or_resolver
+    repeat_rule: >-
+      Do not reload the same workflow/code or rerun provider lookup, image hashing, or resolver
+      by hand for an unchanged draft. If any semantic or evidence input changes, rerun the
+      preview and present the changed summary for fresh Owner confirmation. Copy the exact
+      preview_digest into owner_confirmation.preview_digest. Freeze and Executor preflight
+      recompute this digest before image ingest; changed plan, thesis, observations, strategy,
+      or evidence returns OWNER_RECONFIRMATION_REQUIRED. Authority pins and exact bytes still
+      receive their independent existing rechecks after confirmation.
+
+workflow:
+  - id: inventory_candidates
+    condition: owner requests backlog discovery
+    action: >-
+      Compare provider lifecycles against canonical identity links. Keep ambiguous/partial
+      lifecycles separate; group clean unregistered candidates by instrument first and
+      entry_time ascending within each instrument.
+  - id: select_trade
+    action: Lock exactly one provider lifecycle for review/registration.
+  - id: load_provider_truth
+    delegates_to: trade_lookup
+    action: Resolve provider execution facts and current canonical linkage status.
+  - id: preserve_owner_images
+    condition: owner supplied images
+    action: >-
+      Before analysis, preserve exact original bytes, SHA256 and original filenames.
+      Before Owner confirmation, ALL Agents (including write-capable Agents) must only read,
+      SHA-256 hash, inspect, and keep exact original bytes with filenames; do not ingest to
+      EvidenceStore or mutate canonical state. After explicit in-chat confirmation, the
+      existing Registration Executor alone ingests the exact bytes and binds their durable
+      locator before trade mutation. A non-write-capable Agent retains the originals plus
+      manifest for the approved GitHub-original-upload or ZIP evidence handoff to an
+      authorized receiving Agent. No earlier draft,
+      identity link, or T-number is permitted.
+  - id: analyze_owner_images
+    condition: owner supplied images
+    action: >-
+      Analyze every image under visual_analysis_contract. Record direct visual facts and
+      assessment separately; do not use agent analysis to overrule explicit owner setup attribution.
+  - id: early_sl_visibility_check
+    condition: owner_supplied_images_or_trade_plan_pending
+    action: >-
+      Immediately after analyze_owner_images (and backtest_image_first_intake chart
+      interpretation), inspect all supplied images and any known confirmed plan values once
+      for readability and availability of ALL THREE planned price levels (Entry, Original SL,
+      TP) AND owner_recollection.verbatim_text across both LIVE and BACKTEST intake:
+      for LIVE, missing Original SL blocks 1R/planned_rr/realized_r, missing Chart TP
+      blocks planned_rr/target_capture, and missing Chart Entry omits planned
+      intended_entry separation (intended_entry vs Provider fill); for BACKTEST,
+      entry/stop/target populate backtest-chart-intake.v1 (planned_rr_from_chart).
+      If ANY subset of {Entry, Original SL, TP} and/or owner_recollection.verbatim_text
+      cannot be read from the supplied images or known confirmed plan values, flag all
+      missing items together now and batch EVERY missing question into ONE single combined
+      Owner chat prompt (via collect_owner_recollection and ask_owner_for_missing_original_sl)
+      BEFORE calling resolve_strategy, prepare_confirmation_preview, or
+      backtest-registration preview, eliminating repeat Owner prompts and wasted repeat
+      previews. If the Owner explicitly states Entry or TP cannot be recalled, leave them
+      "unknown" (partial LIVE plan / unknown provenance in backtest-chart-intake.v1) without
+      guessing or blocking OPEN registration; for Original SL, record
+      owner_judgment.original_sl_unavailable_confirmed: true with stop_loss "unknown"
+      (CLOSED LIVE trades still require Owner-attested numeric R or governed manual
+      adjudication).
+  - id: collect_owner_recollection
+    action: >-
+      Capture the Owner's original words exactly in owner_recollection.verbatim_text (and
+      owner_verbatim in backtest-chart-intake.v1), including Chinese text, line breaks,
+      spaces, and punctuation. Keep that quote separate from any concise Agent summary,
+      agent_observation, agent_assessment, and present-day owner_judgment. Do not rewrite
+      the original text. If owner_recollection.verbatim_text is missing after
+      analyze_owner_images and early_sl_visibility_check, batch the missing original-words
+      question together with ALL missing {Entry, Original SL, TP} questions in ONE single
+      combined Owner chat prompt BEFORE calling resolve_strategy,
+      prepare_confirmation_preview, or backtest-registration preview (never split into
+      separate round-trips or ask the Owner for JSON, CLI commands, or a digest). Preserve
+      "unknown" only when the Owner explicitly reports not remembering; apply the same
+      non-recall rule to Entry/TP ("unknown" without guessing or blocking OPEN
+      registration) and Original SL (owner_judgment.original_sl_unavailable_confirmed: true
+      with stop_loss: "unknown").
+  - id: ask_owner_for_missing_original_sl
+    condition: early_sl_visibility_check_flagged_missing_entry_sl_tp_or_original_SL_not_recoverable
+    action: >-
+      Before calling resolve_strategy, prepare_confirmation_preview, or
+      backtest-registration preview (consistent with live_chart_plan_r.unreadable_level,
+      backtest_image_first_intake, early_sl_visibility_check, and
+      collect_owner_recollection), batch ALL missing or unreadable items from
+      {Entry, Original SL, TP} AND missing owner_recollection.verbatim_text into ONE single
+      combined Owner chat prompt so there are no repeated Owner prompts or repeated
+      previews. When Original SL is missing or unreadable, include in that combined prompt:
+      "這筆交易原始停損（SL）的精確價位是多少？請提供進場時的原始 SL，
+      不是後來移動的保護性停損；如果不記得，請直接告訴我。"
+      In the same combined chat prompt, ask for any missing Chart Entry (LIVE
+      intended_entry separation vs Provider fill; BACKTEST entry), Chart TP (LIVE
+      planned_rr/target_capture; BACKTEST target), and owner_recollection.verbatim_text
+      (never ask the Owner for JSON, CLI commands, or a digest, and never substitute a
+      moved, protective, or provider final stop for Original SL). When the Owner supplies
+      levels, populate canonical_capture (computing planned_rr and realized_r from
+      verified Provider fills for LIVE) or backtest-chart-intake.v1 prices.{entry,stop,target}
+      (and planned_rr_from_chart for BACKTEST) before preview (rerunning preview and
+      reconfirming only if semantic values change after an earlier preview). Explicit
+      non-recall rule: if the Owner states Entry or TP cannot be recalled, leave them
+      "unknown" (partial LIVE plan / unknown provenance in backtest-chart-intake.v1; note
+      BACKTEST still requires a known owner or chart-derived entry price) without guessing
+      or blocking OPEN registration; if the Owner explicitly cannot recall Original SL,
+      preserve their exact words and set owner_judgment.original_sl_unavailable_confirmed
+      to true with stop_loss "unknown" — do not fabricate SL or calculated R. CLOSED LIVE
+      trades without any valid numeric realized R remain BLOCKED only after this combined
+      prompt was answered (requiring an explicitly Owner-attested numeric R or governed
+      manual adjudication).
+  - id: resolve_strategy
+    action: >-
+      Attempt strategy attribution with the mandatory resolver, but do not gate registration on
+      the result. MATCHED and NO_MATCH are resolved; AMBIGUOUS and INSUFFICIENT_EVIDENCE are
+      saved as unresolved attribution with null identity. An explicit owner-confirmed "actual
+      entry had no setup" is authoritative NO_MATCH input, not a request for the agent to decide
+      whether a setup existed. Run the existing resolver once as part of the read-only
+      confirmation-preview command below; do not separately rerun it for the same unchanged draft.
+      Later resolution uses the append-only lifecycle amendment path.
+  - id: prepare_confirmation_preview
+    # NOTE: By this point, ALL missing planned price levels (Entry, Original SL, TP) and
+    # owner_recollection.verbatim_text should already have been collected together in ONE
+    # single combined Owner chat prompt before running resolve_strategy,
+    # prepare_confirmation_preview, or backtest-registration preview (leaving non-recallable
+    # Entry/TP as "unknown" and recording owner_judgment.original_sl_unavailable_confirmed: true
+    # with stop_loss: "unknown" for non-recallable Original SL), per
+    # early_sl_visibility_check, collect_owner_recollection,
+    # ask_owner_for_missing_original_sl, and live_chart_plan_r.unreadable_level.
+    command: >-
+      python -m trading_os registration-packet prepare-confirmation --intake <registration-intake.json>
+      or --input <draft.json> [--image-file <sha256>=<path>]
+      [--manifest <manifest.json> --evidence-root <dir>]
+    action: >-
+      Supply only Agent observations/assessment, Owner recollection/judgment, resolver facts,
+      canonical capture, and raw image paths/metadata. With --intake, the command derives
+      Provider facts, SHA/size/name, and packet plumbing, then runs the existing resolver and
+      exact-byte checks. It fetches origin/main once and reuses a clean exact-main checkout or creates one detached
+      fresh-main worktree when the caller is dirty/behind; caller files are preserved. For an
+      external_handoff, pass the manifest and package root so it verifies manifest bytes and
+      packet bindings. Present owner_confirmation_text and provide supporting_detail on request.
+      It does not freeze a packet or change canonical state. Do not copy preview authority pins
+      into the confirmed draft; the existing Executor rederives and checks them.
+  - id: present_for_owner_confirmation
+    action: >-
+      Present the prepare_confirmation_preview result: provider facts, exact evidence identities,
+      agent observations/assessment, owner recollection/judgment, agreed/unresolved facts,
+      current strategy resolution and material unknowns. Missing original SL is a
+      material Owner-plan fact and must be asked explicitly if still unknown, even
+      without any evidence-backed conflict. No canonical trade mutation is allowed yet.
+  - id: confirm_registration_packet
+    gate: owner_confirmation_required
+    action: >-
+      On explicit Owner confirmation of the displayed summary/digest, record status,
+      confirmed_at, and that exact preview_digest. The frozen v2 packet and existing Executor
+      enforce the same semantic snapshot before evidence ingest. Any change returns to this
+      gate and requires a fresh preview and confirmation before execution.
+  - id: build_registration_packet
+    action: >-
+      For a write-capable same-agent raw-image flow, retain the exact registration-intake.v1
+      used for preview and add only owner_confirmation {status, confirmed_at, preview_digest}
+      in a registration-executor-input.v2 envelope. Do not rebuild the full Registration Packet
+      or call freeze separately: the single existing Executor derives the packet with
+      build_registration_intake, rechecks the exact preview digest before image ingest, then
+      runs the formal v2 freeze and the existing write path. For external_handoff, keep the
+      existing owner-confirmed frozen-packet plus exact manifest/evidence package route.
+      The derived canonical_review_projection may be consumed only by workflows/single-trade-review.yaml.
+  - id: route_execution
+    action: >-
+      Route by current-agent capability, never agent name. A write-capable agent continues
+      directly. A non-write-capable agent emits the frozen handoff plus required evidence
+      package for any authorized write-capable agent.
+  - id: delegate_execution
+    condition: current_agent_is_write_capable
+    delegates_to: registration_execution
+    action: >-
+      Enter workflows/registration-execution.yaml with the owner-confirmed compact same-agent
+      envelope or the existing frozen external handoff package. Run its single
+      `registration-executor` command. The project runtime owns evidence ingest,
+      packet persistence, record_reconciliation, projection closure, tests, origin/main
+      persistence and exact remote-object read-back.
+  - id: verify_registration
+    condition: recording_executed
+    action: >-
+      Read back provider identity, canonical trade, frozen strategy_resolution, attached image
+      SHA/locator, registration packet evidence, projections, and remote-main persistence.
+  - id: return_execution_handoff
+    condition: current_agent_is_not_write_capable
+    action: >-
+      Return a capability-neutral handoff plus the evidence package. The receiver may be any
+      authorized write-capable agent and must honor the frozen packet semantics.
+  - id: return_completion_receipt
+    condition: recording_executed
+    action: >-
+      Return the durable registration receipt after projection closure and fresh-main read-back.
+
+preconfirmation_benchmark:
+  schema: registration-preconfirmation-benchmark.v2
+  scenarios:
+    - complete_data_two_exact_appshots_retrospective_replay_matched
+    - fresh_agent_compact_intake_with_raw_images_and_semantic_inputs
+    - confirmed_compact_intake_through_unique_executor_remote_readback
+    - external_handoff_exact_manifest_and_receiver_bytes
+  measures:
+    - end_to_end_cli_wall_from_compact_intake_through_confirmation_text
+    - owner_confirmation_input_construction_and_one_executor_invocation
+    - canonical_projection_and_remote_readback_after_compact_intake_confirmation
+    - semantic_plan_thesis_and_image_byte_drift_rejection_before_ingest
+    - stage_wall_for_checkout_provider_facts_image_hash_packet_build_resolver_and_byte_validation
+    - modeled_agent_cli_tool_calls
+    - workflow_documents_read_and_reloaded
+    - repeated_provider_or_resolver_reads
+  excludes:
+    - actual_owner_response_wait
+    - agent_visual_reasoning
+  comparison_rule: >-
+    Compare separate Provider lookup, resolver, per-image hash, draft assembly and preview
+    calls with one compact-intake preview using identical fixture bytes and semantic facts.
+    Count one independently invoked CLI process as one modeled Agent tool call and report
+    unique workflow document reads separately. This is a deterministic synthetic fresh-agent
+    machine-path scenario, not a measurement of LLM image reasoning or Owner wait.
+  reporting_rule: >-
+    Report raw elapsed observations and sample count. Do not claim a latency distribution,
+    median, or p95 unless the sample count supports it. This measurement never gates or bypasses
+    Owner confirmation or any execution validation.
+
+completion:
+  REGISTRATION_PACKET_READY: >-
+    Provider truth is resolved as far as available; every supplied original image has exact
+    bytes/SHA/original filename preserved and has been analyzed; owner recollection/judgment
+    is separated; strategy resolution and agreed/unresolved facts are explicit; the owner
+    confirmed the complete interpretation; and the Registration Packet semantic state is
+    frozen. Repository EvidenceStore ingest is pending until the authorized Executor runs,
+    regardless of Agent capability. When handing off, the exact originals and manifest must
+    accompany the frozen packet; no earlier EvidenceStore or canonical mutation is permitted.
+  HANDOFF_REQUIRED: >-
+    The Registration Packet is owner-confirmed and frozen, but the current agent lacks
+    authorized write capability. Emit the capability-neutral handoff plus required evidence
+    package for any authorized write-capable agent; do not claim the trade is registered.
+  REGISTERED_INCOMPLETE: >-
+    The T-ID exists and the trade is durable, but the Owner's three inputs are not all saved:
+    the verbatim words, an entry chart and an exit chart (Replay and contemporaneous charts
+    count equally). Which saved image is the entry or exit chart is the Agent's judgment,
+    recorded in the frozen packet as agent_assessment.chart_roles (entry_chart and exit_chart, each with
+    evidence_refs of image aliases and a rationale; one image may be both); the program never classifies
+    an image. An entry chart shows the position at its entry; an exit chart shows how or where the
+    trade ended. An explicit exit marker is not required: a saved chart that shows the outcome after
+    the exit (for example the price path through the stop or target) counts. A chart that stops
+    before the exit does not. The result lists exactly what is missing. Supplying the missing items later completes it; it never
+    creates a second T-ID and is never offered as a new candidate.
+  REGISTERED: >-
+    Everything REGISTERED_INCOMPLETE lacks is present: the Owner's verbatim words and both
+    charts are saved. The real trade is durably canonical through record_reconciliation after provider identity
+    and entry verification. Strategy resolution may be MATCHED, NO_MATCH, or unresolved with
+    null identity; plan completeness may be partial. Evidence identities keep correct provenance,
+    projections are current, and fresh origin/main read-back confirms the trade. review.status
+    may remain not_started; that is a complete registration.
+  STRATEGY_PENDING: >-
+    Legacy Census state for attempts already persisted to
+    canonical/registration/pending-strategy.jsonl. New unresolved resolver outcomes do not
+    enter this state; current capture registers them after provider identity and entry
+    verification. Retrying an old pending lifecycle through current capture returns its
+    original T-ID once registered.
+  BLOCKED: >-
+    A provider authority, original-image preservation, image-analysis, provenance,
+    canonical-projection, lifecycle, or owner-only fact gate is unresolved.

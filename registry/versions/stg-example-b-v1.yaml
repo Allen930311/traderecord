@@ -1,0 +1,18 @@
+version_id: stg-example-b:v1
+status: candidate
+strategy_id: stg-example-b
+effective_from: null
+rules:
+- rule_id: example_b.timeframe.minimum
+  category: trigger
+  required: true
+  operator: timeframe_gte
+  operands:
+    field: plan.timeframe_trigger
+    value: 15m
+  allowed_evidence_timing:
+  - pre_trade
+  - execution
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot

@@ -1,0 +1,93 @@
+schema_version: performance-analysis.workflow.v1
+workflow_id: performance_analysis
+authority: trading-record
+status: operational
+effect: PROJECT_RUNTIME_READ
+
+purpose: >-
+  Report what happened in registered trading populations using descriptive performance
+  metrics. This workflow stops at population-scoped numbers and breakdowns.
+
+architecture:
+  kind: atomic_workflow_over_existing_system
+  new_state_model: false
+  canonical_source: canonical/lifecycle/current.json
+  analytics_source: exports/operational/analytics/current.json
+  strategy_authority: registry/strategy-registry.yaml
+
+canonical_boundary:
+  registered_trades_only: true
+  provider_lookup_for_missing_trades: forbidden
+  canonical_mutation: forbidden
+  strategy_diagnosis: forbidden
+  research_hypotheses: forbidden
+
+performance_population_defaults:
+  overall_utterances:
+    examples: [我的勝率, 最近績效, 交易勝率, 實盤勝率]
+    population: LIVE_overall
+    source: summary_by_mode.live
+  named_strategy_utterance:
+    example: Vegas 的勝率
+    population: LIVE_named_strategy_eligible
+    source: named_strategy_summary_by_mode.<strategy_id>.live
+    resolve_strategy_aliases_from: registry/strategy-registry.yaml
+    unresolved_name_action: ask_for_strategy_scope
+  post_cutover_named_strategy_authority:
+    active_strategy_status_from: registry/strategy-registry.yaml
+    rule_version_pin_must_be_registered_to_strategy: true
+    b3_active_strategy_membership_required: false
+    b3_role: immutable_historical_seed_and_method_validation_pins
+  explicit_only_populations: [PAPER, BACKTEST, ALL_combined_descriptive]
+  combine_without_explicit_owner_request: forbidden
+  live_overall_includes: [provider_verified_closed_live, strategy_unresolved, strategy_no_match, review_pending]
+  live_named_strategy_requires: [provider_verified_closed_live, active_registry_strategy, exact_registered_frozen_rule_version]
+  exclusions: [exact_migrated_episode_double_count, unverified_exit, identity_conflict]
+  review_completion_required_for_performance_eligibility: false
+
+scope_policy:
+  use_explicit_scope_when_given: true
+  examples: [instrument, strategy_id, setup_tag, date_range, recent_n, live_only, paper_only, backtest_only]
+  unspecified_scope: >-
+    Use all eligible registered trades in the default LIVE population and state its scope.
+    Do not silently invent a narrower sample.
+
+projection_policy:
+  refresh_if_stale: true
+  refresh_command: python -m trading_os projections refresh
+  verify_command: python -m trading_os projections verify
+  stale_projection_action: refresh_then_verify
+
+metrics:
+  primary: [trade_count, win_rate, average_realized_r, expectancy_r, profit_factor_when_observable]
+  money_pnl: >-
+    Report verified_provider_net_pnl (after the open fee and signed funding) as the account
+    P&L, with provider_open_fee_total and provider_funding_fee_total. verified_provider_pnl is
+    PropW's close-row netProfit before the open fee and funding; never present it as the
+    account result. If provider_net_pnl_incomplete_count > 0, say how many verified trades lack
+    fee data and are not in the net figure. If provider_net_pnl_funding_gap_count > 0, say how
+    many included trades have an 8-hour settlement with no funding bill (funding may be
+    incomplete for them, so net P&L may be over- or understated), call the net figure provisional,
+    with provider_net_pnl_funding_missing_settlements and the typical funding bill size, and also
+    report verified_provider_net_pnl_funding_reconciled (only trades whose funding is
+    reconciled against every settlement) with provider_net_pnl_funding_reconciled_count, and say it
+    omits whole gap trades (winners included), so it is a reconciliation check, not a result estimate.
+  descriptive_breakdowns:
+    - instrument
+    - strategy_id
+    - setup_tag
+    - confirmation_tag
+    - direction
+    - market_regime_when_observable
+    - review_status
+  evidence_quality_context:
+    - review_completeness
+    - strategy_resolution
+    - rule_observability
+    - provider_verification
+
+completion:
+  ANALYSIS_COMPLETE: >-
+    State population, scope, eligible count, exclusions, metrics, projection freshness,
+    and evidence limitations. Stop after descriptive results.
+  BLOCKED: canonical or projection truth is unavailable and cannot be safely refreshed.

@@ -1,0 +1,70 @@
+schema_version: single-trade-review.workflow.v1
+workflow_id: single_trade_review
+authority: trading-record
+status: operational
+effect: PROJECT_RUNTIME_WRITE
+
+purpose: >-
+  Complete the canonical post-trade review for exactly one already-registered trade
+  through the existing LifecycleStore review writer.
+
+blocked_conditions_reference: workflows/blocked-conditions-index.yaml
+
+architecture:
+  kind: atomic_workflow_over_existing_system
+  new_state_model: false
+  canonical_source: canonical/lifecycle/current.json
+  review_policy: REVIEW_RULES.md
+  diagnostic_decision_tree: "REVIEW_RULES.md §11 — deterministic decision tree, runtime hard-reject vs normative SOP boundaries, positive/negative examples (正反案例) for all 5 diagnostic_class values, and setup_quality / execution_quality anchors (calibrated against trading_os/review_preview.py)"
+  lifecycle_authority: trading_os.operational_lifecycle.LifecycleStore
+
+entry:
+  accepted_selector:
+    - canonical_T_number
+    - exact_trade_id
+  registered_trades_only: true
+  if_reference_is_missing_or_ambiguous: resolve_from_owner_context_or_ask
+  silently_select_another_trade: forbidden
+
+prerequisites:
+  - canonical_trade_state_closed
+  - exit_verification_state_confirmed
+
+canonical_boundary:
+  canonical_mutation: allowed_only_through_capture_review_and_LifecycleStore.review
+  second_review_writer: forbidden
+  provider_trade_discovery: forbidden
+  registration_or_t_number_creation: forbidden
+  strategy_registry_mutation: forbidden
+
+workflow:
+  - Resolve the requested T-number or exact trade ID to one canonical trade.
+  - Read only the selected canonical record, lifecycle, attached evidence, frozen strategy rules, and REVIEW_RULES.md; never route through registration/provider discovery.
+  - If Owner supplies additional images locally, pass a `trade-review-evidence-intake.v1` file to both `capture review-preview --evidence-intake` and the confirmed `capture review --evidence-intake`; this reads and hashes exact bytes without writing before confirmation. For GitHub-only intake, validate the exact committed upload bytes and original filename. If bytes are unavailable use the existing ZIP-to-Codex handoff instead of pretending a chat thumbnail is durable evidence.
+  - Separate Owner-confirmed intent/judgment from direct visual facts; the Agent may propose its own evidence-linked Setup/Risk/Execution/Exit/Lesson assessment.
+  - Apply the review policy while preserving evidence provenance and fact-time distinctions. Replay and regular Owner-provided charts have equal plan evidence eligibility regardless of capture time. Agent interprets NO_SETUP, Setup Quality and Execution deviations, recording structured judgments and cited evidence; code validates schema and bindings without inferring meanings from free text or computing overall quality. Build a read-only `capture review-preview` after the full proposed review is ready.
+  - The Agent may show its first-pass assessment before any Owner final decision or correction exists. Discuss and revise it read-only. Only when the Owner explicitly approves the final readable content may an authenticated interaction host grant approval. Do not add a second confirmation window or ask the Owner for JSON, SHA, timestamps, or CLI commands.
+  - Agent entry point — `trading_os.review_session.preview_review()` is read-only. Once the Owner explicitly confirms the displayed final review, the Agent creates an `agent-review-approval.v1` record bound to the trade and preview digest and calls `save_confirmed_review(..., agent_approval=...)` or `trading_os.review_service.commit_review(...)` directly. `capture review --approval-file` is an optional CLI adapter for the same service. The Agent must not invent Owner confirmation; a delegated record is accountable Agent attestation, not independent chat identity authentication. On an identical already-reviewed retry only repair projections; never write another Review.
+  - The unique LifecycleStore writer recomputes the digest immediately before append and rejects a missing orchestration authorization, altered content, or stale digest before `review_started` or `reviewed` can be written. A digest and timestamp alone never establish Owner approval.
+  - The shared Review application service performs canonical write, full projections refresh, target-trade verification, and final canonical read-back as one completion path regardless of CLI or Python adapter.
+  - Identical replays of an already-reviewed trade only repair and verify projections; changed review, digest, or newly provided image bytes are rejected.
+  - For an explicitly confirmed batch, execute each independent single-trade writer once, then refresh the full projection chain once and verify every target; never skip same-run closure.
+
+remote_execution:
+  local_agent: trading_os.review_service.commit_review via save_confirmed_review, then push main and fresh-main read-back
+  github_only_agent: github-agent-review-request.v1 on the image-intake branch -> .github/workflows/agent-request-runner.yml -> trading_os.github_agent_runner (review_preview, then review_commit)
+  same_writer: both routes end in the unique review_registered_trade -> LifecycleStore.review writer
+  transport: Owner confirms only inside the Agent conversation; the Agent submits the request and reads back the receipt itself. If no write route is available, return a capability-blocked HANDOFF to an authorized Agent or ZIP-to-Codex for original image bytes. Never require the Owner to open, create, label or submit a GitHub Issue.
+  write_authority: LifecycleStore.review_only
+  owner_confirmation: agent-review-approval.v1 bound to the exact preview digest; preview_digest_is_internal_content_binding
+  mode: narrow_runtime_write
+  publication: canonical write published to main (and image-intake for GitHub-only) with remote read-back
+  image_paths: GitHub-committed review-intake/<T-number>/<original-filename> on image-intake
+  image_alternative: existing_ZIP_to_Codex_handoff
+  side_effects_outside_review: forbidden
+  failure: no_remote_commit_or_push
+  owner_experience_acceptance: passed_fresh_agent_end_to_end_2026-10-12
+
+completion:
+  REVIEW_COMPLETE: canonical review is read back and projections are current and verified.
+  BLOCKED: canonical identity, closed state, exit verification, or required review facts are unavailable.

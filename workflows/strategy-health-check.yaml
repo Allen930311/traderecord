@@ -1,0 +1,115 @@
+schema_version: strategy-health-check.workflow.v1
+workflow_id: strategy_health_check
+authority: trading-record
+status: operational
+effect: PROJECT_RUNTIME_READ
+
+purpose: >-
+  Assess what accumulated evidence implies about a strategy, separating performance
+  populations from the smaller reviewed and observable samples used for diagnosis.
+
+architecture:
+  kind: atomic_workflow_over_existing_system
+  new_state_model: false
+  canonical_source: canonical/lifecycle/current.json
+  analytics_source: exports/operational/analytics/current.json
+  health_source: exports/operational/health/current.json
+  strategy_authority: registry/strategy-registry.yaml
+  research_destination: Trading Record Research
+
+canonical_boundary:
+  registered_trades_only: true
+  provider_lookup_for_missing_trades: forbidden
+  canonical_mutation: forbidden
+  strategy_registry_mutation: forbidden
+  hidden_backtest: forbidden
+
+evidence_populations:
+  keep_separate:
+    - reviewed_live_trades
+    - paper_trades
+    - backtest_trades
+    - tradingview_replay_or_backtest
+    - setup_observations
+    - missed_or_skipped_qualified_setups_when_canonical_source_supports_them
+  required_descriptive_outputs:
+    - live_win_rate_and_expectancy
+    - paper_win_rate_and_expectancy
+    - backtest_win_rate_and_expectancy
+    - evidence_population_sample_sizes
+  cross_population_synthesis: allowed_only_when_each_population_remains_explicitly_labeled
+  single_combined_win_rate: forbidden
+
+diagnostic_population:
+  live_method_execution_process_risk_requires:
+    - canonical_review_complete
+    - evidence_observability_sufficient_for_the_claim
+  performance_eligibility_equals_review_completion: false
+  example_population_counts:
+    performance_eligible: 82
+    reviewed: 47
+    rule_observable: 31
+    method_eligible: 26
+  claims:
+    performance_metrics: use_their_population_eligibility_contract
+    why_strategy_wins_or_loses: use_only_reviewed_and_observable_diagnostic_population
+
+version_comparison:
+  rule_version_is_its_own_population: true
+  when_a_strategy_has_more_than_one_rule_version:
+    report_each_version_separately: true
+    never_pool_versions_into_one_win_rate: true
+    show_first_and_last_trade_date_per_version: true
+  source_of_version: metrics.by_rule_version in exports/operational/analytics/current.json
+  built_in_split_by_version: >-
+    metrics.by_rule_version already reports each rule version as its own group; use it for the
+    comparison and check which evidence population (live, paper, backtest) each figure covers,
+    keeping populations separate as required above. named_strategy_summary_by_mode aggregates by
+    strategy and is not split by version. First and last trade dates per version come from the
+    per-trade rows (performance_observations[].rule_version).
+  purpose: >-
+    After a strategy change (workflows/strategy-change.yaml) the Owner needs to see whether the
+    new version behaves differently from the old one; a pooled number cannot show that. Sample
+    sizes stay explicit, and a small new-version sample is described as such, not as a result.
+
+analysis_dimensions:
+  - rule_version
+  - setup_variant
+  - context_or_regime
+  - timeframe
+  - instrument
+  - direction
+  - rule_compliance
+  - diagnostic_class
+  - execution_deviation
+  - stop_loss_take_profit_and_risk_reward_patterns
+  - repeated_failure_or_success_patterns
+
+research_hypothesis_contract:
+  allowed_output: research_hypothesis
+  handoff_destination: Trading Record Research
+  executable_strategy_tool_development_handoff:
+    destination: example-owner/crypto
+    requires_explicit_owner_request: true
+    allowed_scope: executable_strategy_or_tool_development_only
+  automatic_optimization: forbidden
+  strategy_ranking: forbidden
+  registry_mutation: forbidden
+  new_rule_version: forbidden
+  hidden_backtest: forbidden
+  future_edge_claim: forbidden
+  adoption_path_workflow: workflows/strategy-change.yaml
+  adoption_path:
+    - Trading_Record_Strategy_Health_research_hypothesis
+    - Optional_Trading_Record_Setup_Observation_and_manual_Replay_or_Backtest_research
+    - Owner_explicit_adoption
+    - Trading_Record_immutable_next_frozen_rule_version
+    - Trading_Record_registry_and_pin_refresh
+    - Optional_handoff_to_example-owner/crypto_for_executable_strategy_or_tool_development_only_after_explicit_Owner_request
+
+completion:
+  HEALTH_CHECK_COMPLETE: >-
+    Report populations and sample sizes separately, identify the eligible diagnostic sample,
+    distinguish observations from hypotheses, and keep research hypotheses in Trading Record.
+    Route executable strategy or tool development to Crypto only on the Owner's explicit request.
+  BLOCKED: canonical evidence, required review, or exact frozen rule authority is unavailable.

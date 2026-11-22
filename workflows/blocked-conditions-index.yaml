@@ -1,0 +1,1020 @@
+schema_version: blocked-conditions-index.v1
+purpose: >-
+  Centralized index of all BLOCKED and fail-closed gate conditions across Registration
+  and Review workflows (plus directly delegated internal/provider prerequisites).
+  Agents should consult this index when encountering a BLOCKED,
+  OWNER_RECONFIRMATION_REQUIRED, PROJECTION_STALE, or fail-closed stop state to
+  identify the exact trigger, source gate, and Agent-executable recovery steps.
+
+scope:
+  primary_workflows:
+    - workflows/trade-registration.yaml
+    - workflows/registration-execution.yaml
+    - workflows/single-trade-review.yaml
+  supporting_delegated_workflows:
+    - workflows/record-reconciliation.yaml
+    - workflows/trade-lookup.yaml
+    - workflows/provider-sync.yaml
+
+total_conditions: 47
+
+phases:
+  evidence_handling:
+    description: >-
+      Original image byte preservation, SHA256/manifest integrity, EvidenceStore
+      ingest boundaries, provenance classification, and mandatory Agent visual analysis.
+    condition_ids:
+      - EVIDENCE_BYTES_NOT_PRESERVED
+      - CANONICAL_MUTATION_WITHOUT_EVIDENCE_INGEST
+      - REVIEW_IMAGE_MISLABELED_AS_PRE_TRADE
+      - ATTACHED_ARTIFACT_IDENTITY_MISMATCH
+      - PACKET_MISSING_IMAGE_SHA256_OR_LOCATOR
+      - PACKET_IMAGE_SET_DIFFERS_FROM_EXTERNAL_MANIFEST
+      - SAME_AGENT_IMAGE_MISSING_FROM_EVIDENCE_STORE
+      - SCREENSHOT_WITHOUT_AGENT_VISUAL_OBSERVATION
+      - OWNER_CONCLUSION_WITHOUT_AGENT_VISUAL_ANALYSIS
+      - EVIDENCE_MANIFEST_DIGEST_MISMATCH
+      - EVIDENCE_BYTE_SHA_MISMATCH
+      - PACKET_MANIFEST_IMAGE_IDENTITY_MISMATCH
+      - EXECUTION_SAME_AGENT_IMAGE_MISSING_FROM_STORE
+  packet_validation:
+    description: >-
+      Registration Packet envelope, required sections/metadata, Owner confirmation and
+      verbatim words, external handoff package flags, and missing SL/realized-R rules.
+    condition_ids:
+      - OWNER_CONFIRMATION_NOT_CONFIRMED
+      - PACKET_SEMANTIC_STATE_NOT_FROZEN
+      - MISSING_REQUIRED_PACKET_SECTION_OR_METADATA
+      - PACKET_DIGEST_MISMATCH
+      - MISSING_OWNER_VERBATIM_WORDS
+      - EXTERNAL_HANDOFF_MISSING_EVIDENCE_PACKAGE
+      - CLOSED_TRADE_MISSING_ORIGINAL_SL_AND_REALIZED_R
+  authority_pins:
+    description: >-
+      Immutable pin checks against provider_facts, strategy_version_pin, registry
+      digests, retrospective attribution registry digest, and deterministic resolver replay.
+    condition_ids:
+      - AUTHORITY_PIN_PROVIDER_FACTS_DRIFT
+      - AUTHORITY_PIN_STRATEGY_VERSION_DRIFT_OR_MISSING
+      - AUTHORITY_PIN_LEGACY_STRATEGY_REGISTRY_DRIFT
+      - AUTHORITY_PIN_RETROSPECTIVE_REGISTRY_DRIFT
+      - AUTHORITY_PIN_RESOLVER_REPLAY_MISMATCH
+      - AUTHORITY_PIN_INVALID_MAIN_OR_LIFECYCLE_KEY
+  provider_preflight:
+    description: >-
+      Provider freshness and sync health, ambiguous/invalid provider lifecycles, and
+      existing canonical IN_PROGRESS or REGISTERED lifecycle binding consistency.
+    condition_ids:
+      - PROVIDER_SYNC_OR_FRESHNESS_FAILED
+      - PROVIDER_IDENTITY_AMBIGUOUS_OR_INVALID
+      - IN_PROGRESS_PACKET_BINDING_MISMATCH
+      - ALREADY_REGISTERED_BINDING_OR_SEMANTIC_MISMATCH
+      - PROVIDER_SYNC_MAIN_STATE_STALE_OR_AHEAD
+  execution_gates:
+    description: >-
+      Write-capability routing, clean checkout/local commit checks, routine vs PR lane
+      boundaries, projection freshness, origin/main drift, remote read-back, and
+      workflow-level BLOCKED completion states.
+    condition_ids:
+      - WRITE_CAPABILITY_MISSING_HANDOFF_REQUIRED
+      - SOURCE_LOCAL_COMMITS_NOT_IN_ORIGIN_MAIN
+      - SYSTEM_CHANGE_OR_UNKNOWN_EFFECT_IN_ROUTINE_LANE
+      - PROJECTION_STALE_AFTER_MUTATION
+      - ORIGIN_MAIN_ADVANCED_DURING_RUN
+      - REMOTE_MAIN_READBACK_MISMATCH
+      - TRADE_REGISTRATION_COMPLETION_BLOCKED
+      - REGISTRATION_EXECUTION_COMPLETION_BLOCKED
+      - RECORD_RECONCILIATION_COMPLETION_BLOCKED
+  review_prerequisites:
+    description: >-
+      Single-trade review prerequisites: canonical identity resolution, CLOSED state,
+      confirmed exit verification, review facts/evidence, digest approval, and write route.
+    condition_ids:
+      - REVIEW_CANONICAL_IDENTITY_MISSING_OR_UNREGISTERED
+      - REVIEW_TRADE_NOT_CLOSED
+      - REVIEW_EXIT_VERIFICATION_NOT_CONFIRMED
+      - REVIEW_REQUIRED_FACTS_OR_EVIDENCE_UNAVAILABLE
+      - REVIEW_CAPABILITY_OR_APPROVAL_BLOCKED
+      - REVIEW_DIGEST_OR_RETRY_CONFLICT
+      - SINGLE_TRADE_REVIEW_COMPLETION_BLOCKED
+
+conditions:
+  # ============================================================================
+  # Phase 1: evidence_handling
+  # ============================================================================
+  - id: EVIDENCE_BYTES_NOT_PRESERVED
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: image_present_and_original_bytes_or_sha_not_preserved_before_analysis
+    description: >-
+      Owner supplied chart images, but exact original bytes, SHA256 digest, or original
+      filename were not captured before visual analysis began.
+    recovery: >-
+      Do not analyze thumbnails or chat-compressed copies. If the Owner pasted images in
+      local chat, save exact unmodified bytes to `registration-intake/<case>/images/<original-filename>`,
+      verify the file signature and compute SHA256 (`python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      also hashes and records `byte_size` and `original_filename` read-only). If running
+      GitHub-only without byte access, ask the Owner to upload unchanged originals to
+      `registration-intake/<case>/` on the `image-intake` branch or route through an
+      authorized ZIP handoff per `AGENT_CONTEXT.md`.
+
+  - id: CANONICAL_MUTATION_WITHOUT_EVIDENCE_INGEST
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: canonical_trade_mutation_and_original_not_durably_ingested
+    description: >-
+      Canonical trade draft, identity link, or T-ID mutation was attempted before exact
+      original image bytes were durably ingested into `EvidenceStore` (or inversely,
+      ingest was attempted before Owner confirmation).
+    recovery: >-
+      Halt any direct `capture` or canonical write. Before Owner confirmation, run only
+      `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      (read-only; no EvidenceStore write). Only after explicit in-chat Owner confirmation
+      of the preview, pass `registration-executor-input.v2` (or frozen `v1` handoff) to
+      `python -m trading_os registration-executor run --input <input.json>`, which
+      ingests originals via `EvidenceStore` immediately before canonical trade mutation.
+
+  - id: REVIEW_IMAGE_MISLABELED_AS_PRE_TRADE
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: review_image_bound_as_pre_trade_context_without_true_pre_trade_provenance
+    description: >-
+      A post-trade or retrospective Replay chart image was bound as `pre_trade_context`
+      (or via `capture retrospective-live --chart-file`) without genuine pre-trade
+      capture provenance.
+    recovery: >-
+      Edit the `images[]` entry in `registration-intake.v1` (or draft) so retrospective
+      or post-trade charts use `category: review`, `timing: post_trade`, and
+      `type: replay_chart` (or `chart_snapshot`) with `provenance.capture_mode: retrospective_replay`.
+      Never invoke `capture retrospective-live --chart-file` for historical
+      reconstruction charts. Re-run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      and obtain fresh Owner confirmation before running `registration-executor run`.
+
+  - id: ATTACHED_ARTIFACT_IDENTITY_MISMATCH
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: attached_artifact_identity_differs_from_original_ingest
+    description: >-
+      The attached review/trade artifact SHA256 or `EvidenceStore` locator differs from
+      the artifact produced by post-confirmation ingest of the exact original Owner image
+      (e.g., a cropped, annotated, or recompressed copy was substituted).
+    recovery: >-
+      Compare each packet `image_evidence[]` entry against `canonical/evidence/artifacts/`
+      (or re-hash the original source file). Remove any derived/recompressed substitute
+      and point `images[].path` to the exact original Owner bytes. If a new confirmation
+      preview is needed, re-run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`,
+      reconfirm with Owner, and re-run `registration-executor run`.
+
+  - id: PACKET_MISSING_IMAGE_SHA256_OR_LOCATOR
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: registration_packet_missing_image_sha256_or_locator
+    description: >-
+      A `image_evidence[]` entry in the Registration Packet lacks a valid 64-hex
+      `sha256`, `original_filename`, or required `locator` (for `same_agent`) /
+      package path (for `external_handoff`).
+    recovery: >-
+      Inspect `image_evidence[]` in your draft/packet. Ensure every item has
+      `sha256` (64 lowercase hex chars) and `original_filename` (safe basename). For
+      `same_agent` flows, use `registration-intake.v1` (`images[]` with `alias`, `path`,
+      `category`, `timing`, `type`) and run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      followed by `registration-executor run --input <v2-input.json>`, which populates
+      `sha256` and derives the `EvidenceStore` locator automatically.
+
+  - id: PACKET_IMAGE_SET_DIFFERS_FROM_EXTERNAL_MANIFEST
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: registration_packet_image_set_differs_from_external_manifest
+    description: >-
+      In `external_handoff` mode, the owner-image identity set in `packet.image_evidence`
+      does not exactly equal the owner-image set in `manifest.json`, or a SHA/path/filename
+      differs (`packet_image_evidence_contract.external_handoff.validation`).
+    recovery: >-
+      Diff `packet.image_evidence[]` against `manifest.json` (`artifacts[]`) by `sha256`,
+      `original_filename`, and `zip_path`/`path`/`package_path`. Do not mutate the frozen
+      packet or manifest to force a match. Ask the originating Agent to re-export a
+      matching frozen packet + evidence ZIP + `manifest.json`, or re-run `prepare-confirmation`
+      with the complete `--manifest` and `--evidence-root` and get fresh Owner confirmation.
+
+  - id: SAME_AGENT_IMAGE_MISSING_FROM_EVIDENCE_STORE
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: evidence_preservation_contract.gates
+    trigger: same_agent_packet_image_missing_from_evidence_store
+    description: >-
+      A `same_agent` frozen Registration Packet references an image SHA256/locator that
+      does not exist in `EvidenceStore` (`canonical/evidence/artifacts/`), and no matching
+      exact source bytes were supplied via `image_files` or `registration-intake.v1`.
+    recovery: >-
+      Route strictly through `registration-executor` (never bypass `registration-executor`
+      by calling `EvidenceStore` ingest directly). Preferred route: wrap the Owner-confirmed
+      `registration_intake` (`registration-intake.v1` with `images[].path` pointing to the
+      intact local raw files) and `owner_confirmation` inside `registration-executor-input.v2`
+      and run `python -m trading_os registration-executor run --input <v2.json>`. Or, for an
+      existing Owner-confirmed `v1` frozen packet, supply `image_files: {"<sha256>": "<path>"}`
+      alongside `registration_packet` inside `registration-executor-input.v1` and run
+      `python -m trading_os registration-executor run --input <v1.json>` so
+      `registration-executor` itself verifies digests and runs post-confirmation
+      `EvidenceStore` ingest atomically. If raw source files are unavailable locally,
+      re-obtain the exact original bytes from the Owner before preview/execution.
+
+  - id: SCREENSHOT_WITHOUT_AGENT_VISUAL_OBSERVATION
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: visual_analysis_contract.gates
+    trigger: screenshot_present_and_agent_visual_observation_missing
+    description: >-
+      Owner supplied at least one screenshot, but `agent_observation` is missing or
+      incomplete (Agent skipped direct visual inspection of each chart).
+    recovery: >-
+      Visually inspect every image listed in `images[]` (`analyze_every_image: true`).
+      Populate `agent_observation` in `registration-intake.v1` with direct chart facts:
+      `image_timeframe_if_visible`, `visible_price_structure`, `visible_liquidity_or_levels`,
+      `visible_indicator_or_strategy_labels`, `actual_entry_relation_to_visible_structure`,
+      `actual_exit_relation_to_visible_structure_when_shown`, and
+      `legibility_limits_and_uncertainties` (preserve unclear details as `unknown` or
+      `not_observable`). Then re-run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`.
+
+  - id: OWNER_CONCLUSION_WITHOUT_AGENT_VISUAL_ANALYSIS
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: visual_analysis_contract.gates
+    trigger: owner_conclusion_without_agent_visual_analysis
+    description: >-
+      An Owner conclusion or setup judgment was recorded without an independent Agent
+      visual inspection and separated `agent_observation` / `agent_assessment`.
+    recovery: >-
+      Inspect every supplied chart image independently before accepting or resolving the
+      Owner's conclusion. Record observable facts in `agent_observation`, chart-grounded
+      interpretation in `agent_assessment`, Owner's verbatim rationale in
+      `owner_recollection.verbatim_text`, and Owner's present-day conclusion in
+      `owner_judgment` (without overriding explicit Owner setup attribution). Check for
+      material contradictions, then run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`.
+
+  - id: EVIDENCE_MANIFEST_DIGEST_MISMATCH
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: evidence_manifest_digest_mismatch
+    description: >-
+      The `manifest.json` SHA256 during `external_handoff` validation/execution does not
+      match the `evidence_manifest_sha256` sealed in the frozen Registration Packet and
+      `owner_confirmation.preview_digest`.
+    recovery: >-
+      Stop execution; never edit `manifest.json` or the frozen packet to make hashes match.
+      Verify you passed the exact `--manifest <manifest.json>` and `--evidence-root <dir>`
+      from the handoff ZIP. If the manifest was regenerated or modified after preview,
+      re-run `python -m trading_os registration-packet prepare-confirmation --input <draft.json> --manifest <manifest.json> --evidence-root <dir>`,
+      present the updated preview to the Owner for fresh confirmation, freeze a new v2
+      packet, and re-run `registration-executor run`.
+
+  - id: EVIDENCE_BYTE_SHA_MISMATCH
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: evidence_byte_sha_mismatch
+    description: >-
+      Actual image bytes on disk (in `registration-intake`, `image_files`, `evidence_root`,
+      or `EvidenceStore`) fail SHA256 or `byte_size` verification against the packet or
+      manifest.
+    recovery: >-
+      Inspect the error message to identify the mismatched filename/SHA256. Re-compute
+      local file SHA256 and check whether the file was overwritten, truncated, or replaced
+      by a compressed chat copy. Re-obtain the exact original file from the Owner or
+      sender. If the file path in `intake` pointed to the wrong image during preview, fix
+      `images[].path`, re-run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`,
+      and obtain fresh Owner confirmation.
+
+  - id: PACKET_MANIFEST_IMAGE_IDENTITY_MISMATCH
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: packet_manifest_image_identity_mismatch
+    description: >-
+      External handoff packet `image_evidence[]` and `manifest.json` `artifacts[]` differ
+      in image set, `sha256`, `original_filename`, or package path
+      (`required_packet_contract.image_evidence_binding.external_handoff_rule`).
+    recovery: >-
+      Compare `image_evidence[]` in the frozen packet against `artifacts[]` in
+      `manifest.json`. Manifest-only or packet-only images are rejected before staging.
+      Request an intact, matching handoff package from the preparing Agent, or return to
+      `trade-registration.yaml` to rebuild the draft/manifest and run
+      `python -m trading_os registration-packet prepare-confirmation` for fresh Owner approval.
+
+  - id: EXECUTION_SAME_AGENT_IMAGE_MISSING_FROM_STORE
+    phase: evidence_handling
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: same_agent_image_not_in_evidence_store
+    description: >-
+      Executor validation in `same_agent` mode could not locate the confirmed packet
+      image bytes in `EvidenceStore` or in supplied `image_files` / `registration_intake.images`.
+    recovery: >-
+      Check that `images[].path` (for `registration-executor-input.v2`) or `image_files`
+      (for `v1` frozen packets) points to existing, readable original image files whose
+      SHA256 matches the confirmed preview. If you only passed a pre-frozen `v1` packet
+      without `image_files` before ingest ran, add `image_files: {"<sha256>": "<path>"}`
+      to the executor input JSON and re-run `python -m trading_os registration-executor run --input <input.json>`.
+
+  # ============================================================================
+  # Phase 2: packet_validation
+  # ============================================================================
+  - id: OWNER_CONFIRMATION_NOT_CONFIRMED
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: owner_confirmation_not_confirmed
+    description: >-
+      The Registration Packet lacks `owner_confirmation.status == "confirmed"`, a valid
+      timezone-aware `confirmed_at` timestamp, or the exact `preview_digest` bound to
+      Owner approval.
+    recovery: >-
+      Never synthesize Owner confirmation. Run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`,
+      present `owner_confirmation_text` (and `supporting_detail` if requested) in chat to
+      the Owner, and wait for explicit in-chat approval. Then populate `owner_confirmation`
+      with strictly the three keys `{status: "confirmed", confirmed_at: "<ISO-8601>", preview_digest: "<exact-digest>"}`
+      (no extra keys) and run `python -m trading_os registration-executor run --input <input.json>`.
+
+  - id: PACKET_SEMANTIC_STATE_NOT_FROZEN
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: semantic_state_not_frozen
+    description: >-
+      A packet passed to `registration-packet validate` or `persist` (or `v1` capture)
+      does not have `packet.semantic_state == "frozen"`.
+    recovery: >-
+      Do not manually edit `semantic_state` in JSON. If using `registration-executor-input.v2`,
+      pass `{registration_intake, owner_confirmation}` to `python -m trading_os registration-executor run --input <v2.json>`
+      so the executor validates and freezes atomically. If using a `v1` draft, run
+      `python -m trading_os registration-packet freeze --input <confirmed-draft.json> --output <frozen-packet.json> --transport-mode <same_agent|external_handoff>`
+      (adding `--manifest <manifest.json>` for `external_handoff`) first, then run
+      `registration-executor run`.
+
+  - id: MISSING_REQUIRED_PACKET_SECTION_OR_METADATA
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: missing_required_section_or_metadata
+    description: >-
+      The Registration Packet or `canonical_capture` is missing one or more required
+      sections (`provider_facts`, `image_evidence`, `agent_observation`, `agent_assessment`,
+      `owner_recollection`, `owner_judgment`, `agreed_facts`, `unresolved_facts`,
+      `resolver_input`, `strategy_resolution`, `authority_pins`,
+      `canonical_review_projection`, `research_hypotheses`), required `canonical_capture`
+      keys (10 required fields + `realized_r`/`realized_r_authority` for CLOSED trades),
+      or required `owner_confirmation`/`packet`/`authority_pins` metadata.
+    recovery: >-
+      Read the `reason` field returned by `prepare-confirmation` or `registration-executor run`.
+      Ensure `registration-intake.v1` provides empty objects `{}` / lists `[]` explicitly
+      where empty, all 10 `canonical_capture` keys (using `"unknown"` for unknown strings/plan
+      values), and `realized_r` + `realized_r_authority` if the trade is `CLOSED`. Re-run
+      `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`,
+      present any changed summary to Owner for confirmation, and retry `registration-executor run`.
+
+  - id: PACKET_DIGEST_MISMATCH
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.gates
+    trigger: packet_digest_mismatch
+    description: >-
+      `packet.packet_sha256` fails verification against the serialized packet payload, or
+      the Owner-confirmed `preview_digest` differs from the recomputed confirmation
+      snapshot digest (`OWNER_RECONFIRMATION_REQUIRED`).
+    recovery: >-
+      Never patch `packet_sha256` or `preview_digest` manually. Run
+      `python -m trading_os registration-packet validate --packet <frozen-packet.json>` to
+      inspect the exact failure. If semantics (plan, thesis, observations, strategy, or
+      images) changed after preview, re-run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`,
+      present the updated preview to the Owner in chat for fresh confirmation, and use
+      the new `preview_digest` in `owner_confirmation`.
+
+  - id: MISSING_OWNER_VERBATIM_WORDS
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: required_packet_contract.owner_verbatim_contract
+    trigger: missing_owner_recollection_verbatim_text_before_evidence_ingest
+    description: >-
+      A new registration lacks `owner_recollection.verbatim_text` (exact unmodified words
+      from the Owner, separate from Agent summary). Preflight rejects before any
+      `EvidenceStore` write (`workflows/trade-registration.yaml#workflow.collect_owner_recollection`).
+    recovery: >-
+      Ask the Owner in chat for their original entry rationale/thoughts in their own words
+      before running preview/execution. Copy their exact response verbatim (preserving
+      Chinese text, line breaks, spaces, and punctuation) into
+      `owner_recollection.verbatim_text`. Only if the Owner explicitly replies that they
+      cannot recall may you store their exact reply or `"unknown"`. Re-run
+      `prepare-confirmation` and obtain Owner confirmation.
+
+  - id: EXTERNAL_HANDOFF_MISSING_EVIDENCE_PACKAGE
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: runtime_workflow.persist_frozen_packet
+    trigger: external_handoff_packet_missing_manifest_or_evidence_root
+    description: >-
+      A packet with `transport_mode: external_handoff` was passed to `validate`,
+      `persist`, or `registration-executor run` without `--manifest` and `--evidence-root`
+      (or `registration-executor-input.v2` was erroneously combined with `--manifest`/`--evidence-root`).
+    recovery: >-
+      Check `transport_mode` in the packet. For `external_handoff` (`v1`), pass both
+      manifest and evidence root (via `evidence_manifest` and `evidence_root` inside
+      `registration-executor-input.v1` JSON, or CLI flags `--manifest <manifest.json>` and
+      `--evidence-root <dir>` on `python -m trading_os registration-executor run` or
+      `registration-packet validate|persist`). For `same_agent` compact intake
+      (`registration-executor-input.v2`), remove `--manifest` and `--evidence-root` and
+      supply raw local paths in `registration_intake.images[]`.
+
+  - id: CLOSED_TRADE_MISSING_ORIGINAL_SL_AND_REALIZED_R
+    phase: packet_validation
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: live_chart_plan_r.unreadable_level
+    trigger: closed_live_trade_lacks_recoverable_original_sl_and_valid_numeric_realized_r
+    description: >-
+      An already-`CLOSED` LIVE trade has no readable original SL from charts/confirmed
+      plan AND, after explicitly asking the Owner in chat, still lacks either the original
+      SL price, an explicitly Owner-attested numeric R, or a governed manual adjudication
+      (`invariants`, `workflow.ask_owner_for_missing_original_sl`).
+    recovery: >-
+      Do NOT jump to BLOCKED before inspecting all charts and asking the Owner. First ask
+      the exact prompt in chat: "這筆交易原始停損（SL）的精確價位是多少？請提供進場時的原始 SL，不是後來移動的保護性停損；如果不記得，請直接告訴我。"
+      1) If Owner gives original SL: set `canonical_capture.stop_loss`, recompute
+      `planned_rr` and `realized_r` with `trading_os.live_chart_plan.derive_live_chart_plan`
+      using Provider fills (`realized_r_authority: deterministic_execution_calculation`),
+      and run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`.
+      2) If Owner explicitly cannot recall SL: preserve their exact words in
+      `owner_recollection.verbatim_text`, set `owner_judgment.original_sl_unavailable_confirmed: true`
+      and `stop_loss: "unknown"`; ask if Owner can attest an exact numeric R
+      (`realized_r_authority: owner_attestation`) or apply governed manual adjudication
+      (`python -m trading_os adjudicate apply <file>` -> `governed_manual_adjudication`).
+      3) If still no valid numeric R exists for a CLOSED trade, stop and return `BLOCKED`
+      before ingest or canonical mutation—never fabricate R from fixed dollar amounts
+      (e.g., 25U), moved stops, or P&L.
+
+  # ============================================================================
+  # Phase 3: authority_pins
+  # ============================================================================
+  - id: AUTHORITY_PIN_PROVIDER_FACTS_DRIFT
+    phase: authority_pins
+    stop_state: OWNER_RECONFIRMATION_REQUIRED
+    source_file: workflows/registration-execution.yaml
+    source_section: authority_pin_validation.provider_facts
+    trigger: re_read_provider_facts_materially_changed_from_frozen_packet
+    description: >-
+      Re-reading provider truth for `provider_lifecycle_key` during execution reveals
+      that execution facts shown to the Owner (prices, timestamps, direction, close state,
+      or P&L) changed materially since confirmation.
+    recovery: >-
+      Stop execution immediately (`OWNER_RECONFIRMATION_REQUIRED`); never silently patch
+      `provider_facts` in a frozen packet. Refresh provider data if needed
+      (`python -m trading_os provider-sync --provider propw --fetch`), rebuild the
+      confirmation preview against current `origin/main` via
+      `python -m trading_os registration-packet prepare-confirmation --intake <updated-intake.json>`,
+      show the updated provider facts and `preview_digest` to the Owner for fresh
+      confirmation, and re-run `registration-executor run`.
+
+  - id: AUTHORITY_PIN_STRATEGY_VERSION_DRIFT_OR_MISSING
+    phase: authority_pins
+    stop_state: OWNER_RECONFIRMATION_REQUIRED
+    source_file: workflows/registration-execution.yaml
+    source_section: authority_pin_validation.strategy_version_pin
+    trigger: pinned_strategy_version_digest_changed_or_disappeared_or_missing_on_new_persist
+    description: >-
+      The frozen `strategy_version_pin` (`strategy_id`, `rule_version`, `version_digest`,
+      or inherited versions) changed or disappeared from `registry/versions/`, or a new
+      registration lacks `strategy_version_pin` at `persist` (refused as invalid).
+    recovery: >-
+      Note that adding unrelated new strategies does NOT break this pin. If the selected
+      strategy version changed or was missing, do not edit pins by hand: run
+      `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      so the current frozen rule version and `version_digest` are pinned cleanly into a
+      new preview, present the updated summary to the Owner for fresh confirmation, and
+      re-run `python -m trading_os registration-executor run --input <input.json>`.
+
+  - id: AUTHORITY_PIN_LEGACY_STRATEGY_REGISTRY_DRIFT
+    phase: authority_pins
+    stop_state: OWNER_RECONFIRMATION_REQUIRED
+    source_file: workflows/registration-execution.yaml
+    source_section: authority_pin_validation.strategy_registry_digest
+    trigger: legacy_packet_without_strategy_version_pin_encounters_b3_baseline_change
+    description: >-
+      A legacy packet lacking `strategy_version_pin` was re-executed after changes to
+      what B3 froze (`trading_os.registry.registry_as_of_b3`) or legacy registry digest.
+    recovery: >-
+      Do not override legacy pins. Re-generate a current v2 preview from the trade intake
+      with `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      (which pins `strategy_version_pin` under `registration-packet.v2`), present the
+      preview to the Owner for confirmation, and run `registration-executor run`.
+
+  - id: AUTHORITY_PIN_RETROSPECTIVE_REGISTRY_DRIFT
+    phase: authority_pins
+    stop_state: OWNER_RECONFIRMATION_REQUIRED
+    source_file: workflows/registration-execution.yaml
+    source_section: authority_pin_validation.retrospective_attribution_registry_digest
+    trigger: retrospective_attribution_registry_digest_drifted_with_owner_attestation_present
+    description: >-
+      When `resolver_input.owner_attestation` is present, the active
+      `registry/retrospective-attribution.yaml` digest no longer matches the packet's
+      pinned `retrospective_attribution_registry_digest`.
+    recovery: >-
+      Stop execution (`OWNER_RECONFIRMATION_REQUIRED`); never silently remap an expression
+      or confluence context. Re-run `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      against the updated `registry/retrospective-attribution.yaml`, verify any expression/context
+      mapping changes with the Owner in chat, obtain fresh confirmation, and retry
+      `registration-executor run`.
+
+  - id: AUTHORITY_PIN_RESOLVER_REPLAY_MISMATCH
+    phase: authority_pins
+    stop_state: OWNER_RECONFIRMATION_REQUIRED
+    source_file: workflows/registration-execution.yaml
+    source_section: authority_pin_validation.resolver_validation
+    trigger: deterministic_resolver_replay_differs_from_frozen_strategy_resolution
+    description: >-
+      Replaying `trading_os.strategy_resolver` with the exact frozen `resolver_input` and
+      pinned rule authority fails to reproduce the frozen `strategy_resolution` decision
+      and matrix entries identically.
+    recovery: >-
+      Never invent observations, inspect charts to alter facts, or replace the frozen
+      `strategy_resolution` in place. Inspect `resolver_input` and run
+      `python -m trading_os resolve --observations <resolver-input.json> [--provider-entry-at <ts>]`
+      to see the exact replay diff. If the mismatch is caused by legitimate upstream
+      input/registry updates, re-run `prepare-confirmation` and obtain fresh Owner
+      confirmation; if deterministic replay fails on unchanged authority, stop and open a
+      `REPO_CHANGE` bugfix PR (`workflows/record-reconciliation.yaml#persistence_policy.lanes.system_change`).
+
+  - id: AUTHORITY_PIN_INVALID_MAIN_OR_LIFECYCLE_KEY
+    phase: authority_pins
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: registration_packet.confirmation.required_metadata.authority_pins
+    trigger: invalid_source_main_sha_or_provider_lifecycle_key_mismatch
+    description: >-
+      `authority_pins.source_main_sha` is not a valid 40-char commit SHA, or
+      `authority_pins.provider_lifecycle_key` does not match `provider_facts`, or a
+      required `authority_pins` field is absent.
+    recovery: >-
+      Do not copy or hand-edit preview `authority_pins` into a confirmed draft. Use
+      `registration-intake.v1` with `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      (which fetches `origin/main` and sets `fresh_main_sha`) and pass `registration-executor-input.v2`
+      to `python -m trading_os registration-executor run --input <input.json>`, allowing
+      the executor to derive and pin the exact mutation base SHA and `provider_lifecycle_key`.
+
+  # ============================================================================
+  # Phase 4: provider_preflight
+  # ============================================================================
+  - id: PROVIDER_SYNC_OR_FRESHNESS_FAILED
+    phase: provider_preflight
+    stop_state: BLOCKED
+    source_file: workflows/trade-lookup.yaml
+    source_section: workflow.ensure_freshness.failure
+    trigger: ensure_freshness_or_provider_sync_failed_or_row_outside_sync_coverage
+    description: >-
+      Provider execution lookup failed freshness (`python -m propw ensure-fresh --date <YYYY-MM-DD>`
+      run under `ingestion/propw`, per `workflows/trade-lookup.yaml#workflow.ensure_freshness`),
+      `provider-sync --fetch` failed on auth/coverage/malformed payload, or the target
+      `provider_lifecycle_id` is absent from the committed PropW ledger (`guards.on_sync_failure`).
+    recovery: >-
+      Never fall back to browser UI, screenshots, or HAR response rows as ledger truth.
+      1) Check `provider-ledgers/propw/provider-sync-status.json` (`last_successful_sync_at`)
+      and search `python -m trading_os census --provider propw --lookup <OPEN_ID>` (or run
+      `python -m propw ensure-fresh --date <YYYY-MM-DD>` under `ingestion/propw`).
+      2) If local PropW credentials are missing and Owner provides `www.propw.com.har`,
+      follow `workflows/provider-sync.yaml#workflow.credential_bootstrap_from_har` (extract
+      memory-only `PROPW_TOKEN`, `PROPW_DEVICE_ID`, `PROPW_X_AUTHORIZATION` and clear
+      them right after) and run `python -m trading_os provider-sync --provider propw --fetch --commit --publish-main`.
+      3) If running as a GitHub-only Agent without provider credentials, report `BLOCKED`
+      with `last_successful_sync_at` and hand off to a credentialed local Agent to sync
+      before retrying `prepare-confirmation`.
+
+  - id: PROVIDER_IDENTITY_AMBIGUOUS_OR_INVALID
+    phase: provider_preflight
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: provider_and_canonical_preflight
+    trigger: provider_lifecycle_state_ambiguous_or_invalid
+    description: >-
+      Provider lifecycle preflight or `provider-sync` encountered an `AMBIGUOUS` or
+      `INVALID` provider lifecycle state (`normalization_status != "ok"`, duplicate/conflicting
+      `open_id` candidates, or `workflows/provider-sync.yaml#invariants.ambiguous_provider_identity`).
+    recovery: >-
+      Do not guess or force-merge ambiguous lifecycles. Inspect the row via
+      `python -m trading_os census --provider propw --lookup <OPEN_ID>` and check
+      `provider-ledgers/propw/normalized/trade-lifecycles.jsonl` (and `python -m propw trades --date <YYYY-MM-DD> --json`
+      under `ingestion/propw`). If the committed ledger has stale/incomplete normalization,
+      run a credentialed `python -m trading_os provider-sync --provider propw --fetch`; if
+      a normalization bug or true identity conflict persists, stop and escalate via a
+      `REPO_CHANGE` PR or governed Owner adjudication.
+
+  - id: IN_PROGRESS_PACKET_BINDING_MISMATCH
+    phase: provider_preflight
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: provider_and_canonical_preflight
+    trigger: in_progress_draft_missing_or_different_packet_sha256_binding
+    description: >-
+      The provider lifecycle is `IN_PROGRESS` in canonical/Registration Census state, but
+      the durable draft or provider identity binding lacks a matching
+      `registration_packet_sha256` or has different canonical semantics.
+    recovery: >-
+      Do not create a second draft or overwrite the existing draft. Inspect
+      `python -m trading_os census --provider propw --lookup <OPEN_ID>` and
+      `canonical/lifecycle/current.json` + `canonical/lifecycle/identity-links.jsonl` to
+      locate the bound `registration_packet_sha256` and original file at
+      `canonical/registration/packets/<packet_sha256>.json`. Resume only by passing that
+      exact original frozen packet (and matching evidence) to
+      `python -m trading_os registration-executor run --input <input.json>`. If the bound
+      packet itself is irreconcilable with current truth, escalate for governed lifecycle
+      remediation rather than fabricating a new draft.
+
+  - id: ALREADY_REGISTERED_BINDING_OR_SEMANTIC_MISMATCH
+    phase: provider_preflight
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: provider_and_canonical_preflight
+    trigger: already_registered_packet_sha_or_canonical_semantics_mismatch
+    description: >-
+      The provider lifecycle already maps to a canonical T-ID (`ALREADY_REGISTERED`), but
+      the submitted input's `packet_sha256`, instrument, direction, `strategy_resolution`,
+      or attached images differ from the durable bound packet (`workflow.execute_registration.retry`,
+      `test_policy.end_to_end_benchmark.retry_inputs`).
+    recovery: >-
+      Never ingest new images, rewrite the canonical trade, or allocate a second T-ID.
+      1) Check the existing trade via `python -m trading_os census --provider propw --lookup <OPEN_ID>`
+      and read `canonical/registration/packets/<bound_sha>.json`.
+      2) For an idempotent retry, pass the exact unchanged original packet/intake.
+      3) If the Owner wants to add chart roles, fix plan/R, declare unrecoverable words,
+      or resolve unresolved strategy attribution on that existing T-ID, use the dedicated
+      append-only supplement/amendment commands instead: `registration-executor record-chart-roles`,
+      `registration-executor record-plan-r-correction`,
+      `registration-executor record-owner-words-unrecoverable`, or
+      `python -m trading_os capture strategy-attribution`.
+
+  - id: PROVIDER_SYNC_MAIN_STATE_STALE_OR_AHEAD
+    phase: provider_preflight
+    stop_state: FAIL_CLOSED
+    source_file: workflows/provider-sync.yaml
+    source_section: workflow.persist_and_read_back
+    trigger: publish_main_stale_ahead_dirty_or_moved_origin_main
+    description: >-
+      Committed `provider-sync --commit --publish-main` (or `--commit`) failed preflight
+      because the checkout is dirty/stale/ahead of `origin/main`, canonical/registry
+      sources are unclean, committed evidence bytes are missing for analytics locators,
+      or `origin/main` moved before push.
+    recovery: >-
+      Do not force-push. Run `git status` and `git fetch origin main` to verify a clean
+      checkout at exact `origin/main` with no untracked/ignored stale files in
+      `exports/operational/**` or `provider-ledgers/propw/`. If `origin/main` moved or
+      unclean artifacts exist, switch to a clean worktree at `origin/main` and re-run
+      `python -m trading_os provider-sync --provider propw --fetch --commit --publish-main`
+      (or `python -m trading_os provider-sync --provider propw --fetch --commit --push --create-pr`
+      without `--publish-main` if an Owner-reviewed data PR is preferred).
+
+  # ============================================================================
+  # Phase 5: execution_gates
+  # ============================================================================
+  - id: WRITE_CAPABILITY_MISSING_HANDOFF_REQUIRED
+    phase: execution_gates
+    stop_state: HANDOFF_REQUIRED
+    source_file: workflows/trade-registration.yaml
+    source_section: execution_routing
+    trigger: current_agent_lacks_write_capability_or_direct_byte_execution_access
+    description: >-
+      The Registration Packet is Owner-confirmed (`REGISTRATION_PACKET_READY`), or the
+      Owner wants to complete registration, but the current Agent lacks authorized
+      runtime write capability (`authorized_repository_write`, `authorized_runtime_canonical_mutation`,
+      `git_commit_and_push_to_origin_main`, or remote read-back).
+    recovery: >-
+      Never offload execution, JSON editing, CLI commands, or GitHub Issues onto the Owner,
+      and never simulate completion via direct JSON edits. Freeze the Owner-confirmed
+      packet with `transport_mode: external_handoff` via
+      `python -m trading_os registration-packet freeze --input <confirmed-draft.json> --output <frozen-packet.json> --transport-mode external_handoff --manifest <manifest.json>`
+      (or submit `github-agent-registration-request.v1` to `image-intake` if operating via
+      the authorized shared Runner), emit the capability-neutral `frozen_packet_plus_evidence_zip`
+      package (`packet`, `packet_sha256`, `evidence_manifest`, `evidence_manifest_sha256`,
+      exact original bytes, per-artifact SHA256, original filenames), and report
+      `HANDOFF_REQUIRED` / `BLOCKED` for an authorized write-capable Agent.
+
+  - id: SOURCE_LOCAL_COMMITS_NOT_IN_ORIGIN_MAIN
+    phase: execution_gates
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: persistence.routine_record.checkout_selection
+    trigger: source_local_commits_not_in_origin_main
+    description: >-
+      The caller's checkout has local commits that are not in `origin/main`, blocking
+      routine `direct_main` registration execution.
+    recovery: >-
+      Run `git fetch origin main` and `git log --oneline origin/main..HEAD` to inspect the
+      local commits. If they belong to another task or PR, switch to a clean checkout or
+      fresh worktree at `origin/main` (`git checkout main && git pull --ff-only origin main`
+      or `git worktree add`) before running `python -m trading_os registration-executor run --input <input.json>`.
+      Never mix unrelated code commits into a routine registration push.
+
+  - id: SYSTEM_CHANGE_OR_UNKNOWN_EFFECT_IN_ROUTINE_LANE
+    phase: execution_gates
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: persistence.system_change
+    trigger: diff_touches_non_allowlist_surface_or_unknown_effect_or_missing_capability
+    description: >-
+      Changed files fall outside `test_policy.data_only_registration.path_rules` /
+      `record-reconciliation.yaml#persistence_policy.routine_artifact_allowlist` (e.g.,
+      `trading_os/**`, `workflows/**`, `registry/**`, `tests/**`, `*.md` except `PERFORMANCE.md`),
+      a deletion/type-change occurred, or a system capability gap blocks execution
+      (`workflows/record-reconciliation.yaml#persistence_policy.unknown_effect`).
+    recovery: >-
+      Stop routine `direct_main` execution immediately; never bundle code, schema, rule,
+      or workflow edits into a routine record commit. Separate any system fix onto a
+      feature branch, run the full required suite (`python -m pytest tests -q -p no:cacheprovider`,
+      `python -m pytest ingestion/intake/tests -q -p no:cacheprovider`,
+      `python -m pytest ingestion/propw/tests -q -p no:cacheprovider`), open and merge a
+      `REPO_CHANGE` PR to `main`, then resume registration against fresh `origin/main`
+      (reconfirming with Owner if any authority pin drifted).
+
+  - id: PROJECTION_STALE_AFTER_MUTATION
+    phase: execution_gates
+    stop_state: PROJECTION_STALE
+    source_file: workflows/registration-execution.yaml
+    source_section: projection_closure.stale_result
+    trigger: projection_refresh_or_verify_fails_digest_chain_or_target_visibility
+    description: >-
+      After canonical trade or lifecycle mutation, generated read models (`analytics`,
+      `health`, `trade_view`, `handoff`, or `registration-census.json`) have mismatched
+      upstream digests or omit the target trade (`workflow.execute_registration.stop_conditions`,
+      `workflows/record-reconciliation.yaml#completion_gate.fail_closed`).
+    recovery: >-
+      Do not claim `COMPLETE` or push stale projections. Run
+      `python -m trading_os projections refresh --target-trade <trade_id>` once (which
+      rebuilds `analytics`, `health`, `trade_view`, `handoff`, Census, and runs embedded
+      verification). If still `PROJECTION_STALE`, inspect the reported digest mismatch via
+      `python -m trading_os projections verify --target-trade <trade_id> --require-census-fresh`
+      and fix the underlying stale source/unclean output artifact before re-running
+      `registration-test-lane` and pushing.
+
+  - id: ORIGIN_MAIN_ADVANCED_DURING_RUN
+    phase: execution_gates
+    stop_state: origin_main_advanced
+    source_file: workflows/registration-execution.yaml
+    source_section: workflow.execute_registration.stop_conditions
+    trigger: origin_main_moved_between_mutation_base_capture_and_pre_push_check
+    description: >-
+      `origin/main` received a new commit between `registration-test-lane begin`
+      (mutation-base capture) and the pre-push `git fetch origin main` check
+      (`workflows/record-reconciliation.yaml#completion_gate.fail_closed`).
+    recovery: >-
+      Do not force-push or push an un-reconciled diff. Run `git fetch origin main`,
+      abandon/reset the stale staged commit (note: `registration-executor run-batch`
+      runs in an isolated worktree so source files are untouched), and re-run
+      `python -m trading_os registration-executor run --input <input.json>` against the
+      new `origin/main`. Note that `source_main_sha` drift alone does not invalidate the
+      Owner confirmation unless a relevant authority surface (provider facts or pinned
+      strategy version/registry) also changed.
+
+  - id: REMOTE_MAIN_READBACK_MISMATCH
+    phase: execution_gates
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: persistence.routine_record.remote_readback
+    trigger: remote_main_readback_equivalence_gate_mismatch
+    description: >-
+      Post-push `git fetch origin main` failed the equivalence gate: pushed SHA differs
+      from `origin/main`, or `git show origin/main:<path>` disagrees on canonical trade,
+      lifecycle, identity link, frozen packet, `EvidenceStore` SHA256 bytes, Census
+      recomputation, or projection manifests (`workflows/record-reconciliation.yaml#completion_gate.fail_closed`).
+    recovery: >-
+      Never report `REGISTERED` or `COMPLETE` from a local commit alone. Fetch remote
+      `origin/main` (`git fetch origin main`), compare local vs `origin/main` objects
+      using `git diff HEAD..origin/main --stat` and `git show origin/main:canonical/lifecycle/current.json`,
+      and run `python -m trading_os projections verify --target-trade <trade_id> --require-census-fresh`.
+      If `origin/main` did not receive the commit, retry from clean `origin/main`; if
+      remote objects are corrupt or inconsistent, open a diagnostic `REPO_CHANGE` PR.
+
+  - id: TRADE_REGISTRATION_COMPLETION_BLOCKED
+    phase: execution_gates
+    stop_state: BLOCKED
+    source_file: workflows/trade-registration.yaml
+    source_section: completion.BLOCKED
+    trigger: provider_authority_image_preservation_analysis_provenance_projection_lifecycle_or_owner_fact_gate_unresolved
+    description: >-
+      Umbrella completion state for `trade-registration.yaml` when any pre-confirmation
+      or routing gate remains unresolved (provider truth, original-image bytes/SHA,
+      visual analysis, provenance, projection/lifecycle, or Owner-only fact).
+    recovery: >-
+      Inspect the specific failed step/error and look up its granular condition ID in
+      this index (`evidence_handling`, `packet_validation`, `provider_preflight`, or
+      `execution_gates`). Resolve Owner-only gaps (verbatim words, missing original SL/R,
+      explicit confirmation) in chat, resolve provider gaps via `provider-sync --fetch`
+      (or handoff), and verify the intake with
+      `python -m trading_os registration-packet prepare-confirmation --intake <intake.json>`
+      until `status` reaches `READY_FOR_OWNER_CONFIRMATION`.
+
+  - id: REGISTRATION_EXECUTION_COMPLETION_BLOCKED
+    phase: execution_gates
+    stop_state: BLOCKED
+    source_file: workflows/registration-execution.yaml
+    source_section: completion.BLOCKED
+    trigger: integrity_evidence_identity_lifecycle_write_capability_or_repository_preflight_failed
+    description: >-
+      Umbrella completion state for `registration-execution.yaml` when preflight,
+      evidence ingest, packet validation, lifecycle transition, write capability, or
+      repository persistence/read-back fails (`canonical` state must remain unmutated).
+    recovery: >-
+      Read the structured JSON `{status, reason}` returned by
+      `python -m trading_os registration-executor run --input <input.json>`. Match
+      `reason` against the corresponding condition in `evidence_handling`,
+      `packet_validation`, `authority_pins`, `provider_preflight`, or `execution_gates`.
+      If `status == "OWNER_RECONFIRMATION_REQUIRED"`, re-run `prepare-confirmation` and
+      get fresh Owner confirmation; if `worktree` is dirty or `origin/main` advanced,
+      re-run from a clean checkout of `origin/main`. Never repair a frozen packet in place.
+
+  - id: RECORD_RECONCILIATION_COMPLETION_BLOCKED
+    phase: execution_gates
+    stop_state: BLOCKED
+    source_file: workflows/record-reconciliation.yaml
+    source_section: completion.BLOCKED
+    trigger: authority_evidence_lifecycle_or_validation_rules_reject_progress
+    description: >-
+      Internal `record_reconciliation` completion state when authority, evidence,
+      lifecycle state transition, or validation rules reject progress (including
+      `agent_execution.stop_for_user_only_when: completion is BLOCKED and only the owner can resolve it`).
+    recovery: >-
+      Do not bypass `LifecycleStore` transitions or route around `registration-execution.yaml`.
+      Surface the exact `blockers`, `missing_facts`, and `next_safe_action` from the
+      execution receipt. If the blocker is Owner-resolvable (missing original words,
+      original SL/R, or confirmation), ask only for those specific missing facts in chat;
+      if it is a system/schema/capability blocker, stop routine execution and resolve via
+      a `REPO_CHANGE` PR.
+
+  # ============================================================================
+  # Phase 6: review_prerequisites
+  # ============================================================================
+  - id: REVIEW_CANONICAL_IDENTITY_MISSING_OR_UNREGISTERED
+    phase: review_prerequisites
+    stop_state: BLOCKED
+    source_file: workflows/single-trade-review.yaml
+    source_section: completion.BLOCKED
+    trigger: canonical_identity_unavailable_or_trade_not_registered
+    description: >-
+      The target T-number (`T000xxx`) or `trade_id` (`trd_...`) is missing, ambiguous,
+      or does not exist in `canonical/lifecycle/current.json` (`entry.registered_trades_only: true`,
+      `entry.if_reference_is_missing_or_ambiguous: resolve_from_owner_context_or_ask`).
+    recovery: >-
+      Search `canonical/lifecycle/current.json` (and `python -m trading_os census --provider propw`
+      if the Owner gave an exchange ID) to resolve an unambiguous canonical `trade_id`
+      and `trade_no`. Never silently pick a different trade. If ambiguous or missing, ask
+      the Owner in chat which specific T-number to review. If the trade exists only in the
+      PropW ledger and is not registered yet, inform the Owner that post-trade review
+      requires an already-registered canonical trade and ask whether to run
+      `workflows/trade-registration.yaml` first.
+
+  - id: REVIEW_TRADE_NOT_CLOSED
+    phase: review_prerequisites
+    stop_state: BLOCKED
+    source_file: workflows/single-trade-review.yaml
+    source_section: prerequisites
+    trigger: canonical_trade_state_not_closed
+    description: >-
+      The target canonical trade is still `OPEN` or `PARTIALLY_CLOSED` (or earlier)
+      rather than `CLOSED` (`prerequisites: canonical_trade_state_closed`,
+      `workflows/record-reconciliation.yaml#workflow.review.gate.if_not_closed: do_not_review`).
+    recovery: >-
+      Verify `records[trade_id].state` in `canonical/lifecycle/current.json`. Do not run
+      `capture review-preview` or `capture review` on an unclosed trade. Never use
+      `capture close` or `capture verify-exit` on an unregistered trade (they apply ONLY
+      to an already-registered canonical `trade_id` in `canonical/lifecycle/current.json`;
+      unregistered trades must go through `workflows/trade-registration.yaml` and
+      `registration-executor` first). On that already-registered canonical `trade_id`,
+      check whether the trade has actually closed on PropW
+      (`python -m trading_os provider-sync --provider propw --fetch` if local) or confirm
+      close details with the Owner, then run
+      `python -m trading_os capture close --trade-id <trade_id> --exit-price <price> --closed-at <iso8601> --realized-r <r> --source-ref <ref>`
+      and `capture verify-exit` before returning to `single-trade-review.yaml`.
+
+  - id: REVIEW_EXIT_VERIFICATION_NOT_CONFIRMED
+    phase: review_prerequisites
+    stop_state: BLOCKED
+    source_file: workflows/single-trade-review.yaml
+    source_section: prerequisites
+    trigger: exit_verification_state_not_confirmed
+    description: >-
+      The target trade is `CLOSED`, but exit verification is not `confirmed`
+      (`records[trade_id].exit_verification.state != "confirmed"`; prerequisite
+      `exit_verification_state_confirmed`,
+      `workflows/record-reconciliation.yaml#workflow.review.gate.if_exit_verification_not_confirmed: reconcile_exit_first`).
+    recovery: >-
+      Inspect `records[trade_id].exit_verification.state` in `canonical/lifecycle/current.json`
+      (`capture verify-exit` applies ONLY to an already-registered canonical `trade_id` in
+      `canonical/lifecycle/current.json`, never unregistered trades). Complete exit
+      verification first (`reconcile_exit_first`): ensure exit evidence is attached and
+      execute `python -m trading_os capture verify-exit --trade-id <trade_id> --authority-class <deterministic_execution_calculation|owner_attestation|governed_manual_adjudication> --evidence-ref <ref> [--realized-r <r>]`,
+      then run `python -m trading_os projections refresh --target-trade <trade_id>` before
+      calling `capture review-preview`.
+
+  - id: REVIEW_REQUIRED_FACTS_OR_EVIDENCE_UNAVAILABLE
+    phase: review_prerequisites
+    stop_state: BLOCKED
+    source_file: workflows/single-trade-review.yaml
+    source_section: completion.BLOCKED
+    trigger: required_review_facts_or_original_image_bytes_unavailable
+    description: >-
+      Required review facts, pinned frozen strategy rules, or original image bytes
+      needed to perform the review cannot be resolved (`workflow` &
+      `workflows/record-reconciliation.yaml#workflow.review.gate.required_review_facts`).
+    recovery: >-
+      Read `records[trade_id]` in `canonical/lifecycle/current.json`, all attached evidence
+      in `canonical/evidence/artifacts/`, the trade's exact pinned rule version in
+      `registry/versions/`, and `REVIEW_RULES.md`. If new chart images are needed and
+      supplied locally, pass a `trade-review-evidence-intake.v1` JSON via
+      `--evidence-intake <intake.json>` to `python -m trading_os capture review-preview`;
+      if GitHub-only, instruct Owner to upload originals to `review-intake/<T-number>/<original-filename>`
+      on `image-intake` (or transfer via approved ZIP handoff—never use chat thumbnails).
+      If the Owner confirms no additional facts exist for a pinned rule, record that item
+      as `unknown` or `not_observable` per `REVIEW_RULES.md` instead of guessing from P&L.
+
+  - id: REVIEW_CAPABILITY_OR_APPROVAL_BLOCKED
+    phase: review_prerequisites
+    stop_state: HANDOFF_REQUIRED
+    source_file: workflows/single-trade-review.yaml
+    source_section: remote_execution.transport
+    trigger: no_write_route_available_or_owner_review_approval_missing
+    description: >-
+      The current Agent lacks a write route (`commit_review` / `capture review` locally or
+      `github-agent-review-request.v1` via the `image-intake` Runner), or the review lacks
+      an explicit in-chat Owner confirmation bound to `preview_digest`
+      (`agent-review-approval.v1`).
+    recovery: >-
+      First run `python -m trading_os capture review-preview --trade-id <trade_id> --review-file <review.json> [--evidence-intake <intake.json>]`
+      (or `trading_os.review_session.preview_review()`), present the full proposed review
+      in chat, and get explicit Owner approval. If write-capable locally, create
+      `agent-review-approval.v1` with the exact `preview_digest` and run
+      `python -m trading_os capture review --trade-id <trade_id> --reviewed-at <iso8601> --review-file <review.json> --approval-file <approval.json>`
+      (or `save_confirmed_review`), then push `main` and read back remote `origin/main`.
+      If GitHub-only with Runner access, submit `github-agent-review-request.v1` to
+      `image-intake`. If neither write route exists, return a capability-blocked HANDOFF
+      to an authorized write-capable Agent / approved ZIP handoff; never ask the Owner to
+      open a GitHub Issue or edit JSON.
+
+  - id: REVIEW_DIGEST_OR_RETRY_CONFLICT
+    phase: review_prerequisites
+    stop_state: BLOCKED
+    source_file: workflows/single-trade-review.yaml
+    source_section: workflow
+    trigger: review_preview_digest_mismatch_or_changed_already_reviewed_retry
+    description: >-
+      During `capture review` / `commit_review`, the recomputed `preview_digest` does not
+      match `agent-review-approval.v1`, or an already-`REVIEWED` trade was retried with
+      altered review fields, digest, or newly supplied image bytes (`remote_execution.failure`).
+    recovery: >-
+      Do not commit or push. 1) If the trade is not yet `REVIEWED`, re-run
+      `python -m trading_os capture review-preview --trade-id <trade_id> --review-file <review.json> [--evidence-intake <intake.json>]`,
+      present any changed fields to the Owner in chat for fresh approval, and regenerate
+      `agent-review-approval.v1` with the new `preview_digest`.
+      2) If the trade is already `REVIEWED` and the previous review was identical, pass
+      the exact matching review and `preview_digest` (or run `python -m trading_os projections refresh --target-trade <trade_id>`)
+      to repair projections only; if a genuine change to a saved review is needed, use
+      the governed review correction path rather than overwriting.
+
+  - id: SINGLE_TRADE_REVIEW_COMPLETION_BLOCKED
+    phase: review_prerequisites
+    stop_state: BLOCKED
+    source_file: workflows/single-trade-review.yaml
+    source_section: completion.BLOCKED
+    trigger: canonical_identity_closed_state_exit_verification_or_required_review_facts_unavailable
+    description: >-
+      Umbrella completion state for `single-trade-review.yaml` when canonical identity,
+      `CLOSED` state, confirmed exit verification (`records[trade_id].exit_verification.state == "confirmed"`),
+      or required review facts/route are unavailable.
+    recovery: >-
+      Verify all four prerequisites in `canonical/lifecycle/current.json` for the target
+      trade (`state == "CLOSED"`, `exit_verification.state == "confirmed"`, valid `trade_id`,
+      readable `evidence[]`), then resolve the matching granular condition in
+      `review_prerequisites` (`REVIEW_CANONICAL_IDENTITY_MISSING_OR_UNREGISTERED`,
+      `REVIEW_TRADE_NOT_CLOSED`, `REVIEW_EXIT_VERIFICATION_NOT_CONFIRMED`,
+      `REVIEW_REQUIRED_FACTS_OR_EVIDENCE_UNAVAILABLE`, `REVIEW_CAPABILITY_OR_APPROVAL_BLOCKED`,
+      or `REVIEW_DIGEST_OR_RETRY_CONFLICT`) before running `capture review-preview` and
+      `capture review`.

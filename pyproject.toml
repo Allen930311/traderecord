@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "traderecord"
+version = "0.1.0"
+description = "An evidence-first trading journal engine for humans and AI agents: owner-confirmed registration, content-addressed evidence, independent review."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = ["PyYAML>=6.0"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Allen930311/traderecord"
+Issues = "https://github.com/Allen930311/traderecord/issues"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

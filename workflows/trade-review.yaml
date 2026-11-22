@@ -1,0 +1,36 @@
+schema_version: trade-review-router.workflow.v1
+workflow_id: trade_review
+authority: trading-record
+status: operational
+effect: PROJECT_RUNTIME_READ
+
+purpose: >-
+  Route a trade-review request to one independently runnable atomic SOP. This router
+  composes the selected contract and does not redefine review or analytics semantics.
+
+architecture:
+  kind: router_orchestrator
+  new_state_model: false
+  atomic_contracts:
+    single_trade_review: workflows/single-trade-review.yaml
+    performance_analysis: workflows/performance-analysis.yaml
+    strategy_health_check: workflows/strategy-health-check.yaml
+
+dispatch:
+  - when: canonical_T_number_or_exactly_one_trade_requested
+    workflow: single_trade_review
+    semantics_source: workflows/single-trade-review.yaml
+  - when: strategy_health_or_cross_trade_diagnosis_requested
+    workflow: strategy_health_check
+    condition: strategy_method_execution_or_process_diagnosis_requested
+    semantics_source: workflows/strategy-health-check.yaml
+  - when: performance_numbers_or_descriptive_breakdowns_requested
+    workflow: performance_analysis
+    condition: descriptive_performance_numbers_or_breakdowns_requested
+    semantics_source: workflows/performance-analysis.yaml
+
+guardrails:
+  - resolve_or_clarify_an_ambiguous_single_trade_before_writing
+  - never_widen_a_single_trade_request_into_cross_trade_analysis
+  - no_provider_trade_discovery_or_registration
+  - router_does_not_define_review_policy_performance_metrics_or_strategy_diagnosis

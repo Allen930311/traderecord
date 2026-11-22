@@ -1,0 +1,51 @@
+registry_version: retrospective-attribution-registry.v1
+
+# These contracts extend frozen strategy rule versions without changing the
+# rule definitions themselves. New expressions are admitted only when the
+# active frozen rule permits them and this registry defines their components.
+entry_expressions:
+  - strategy_id: stg-ict-liquidity
+    rule_version: stg-ict-liquidity:v1
+    expression_id: ob-mss
+    required_components: [MSS, OB_RETEST]
+
+# Context confluences are governed values, not strategy identities. A strategy
+# ID may also be used as a strategy-derived confluence; keep the two kinds
+# distinct in retrospective attribution output.
+confluence_contexts:
+  - context_id: vegas_tunnel
+    status: active
+    display_name: Vegas Tunnel
+    aliases: [vegas-tunnel, vegas tunnel]
+  - context_id: htf_support
+    status: active
+    display_name: Higher-timeframe support
+    aliases: [higher-timeframe support, higher timeframe support]
+  - context_id: htf_resistance
+    status: active
+    display_name: Higher-timeframe resistance
+    aliases: [higher-timeframe resistance, higher timeframe resistance]
+  - context_id: liquidity_location
+    status: active
+    display_name: Liquidity location
+    aliases: [liquidity, liquidity context]
+  - context_id: london_session
+    status: active
+    display_name: London session
+    aliases: [london]
+  - context_id: new_york_session
+    status: active
+    display_name: New York session
+    aliases: [new york, ny session]
+  - context_id: premium_discount
+    status: active
+    display_name: Premium / discount
+    aliases: [premium, discount]
+  - context_id: rsi_divergence
+    status: active
+    display_name: RSI divergence
+    aliases: [rsi divergence]
+  - context_id: vwap
+    status: active
+    display_name: VWAP
+    aliases: []

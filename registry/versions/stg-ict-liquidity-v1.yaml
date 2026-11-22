@@ -1,0 +1,170 @@
+version_id: stg-ict-liquidity:v1
+rule_version: stg-ict-liquidity:v1
+schema_version: strategy-rule-version.v1
+status: active
+strategy_id: stg-ict-liquidity
+lifecycle_at_freeze: active
+classification: independent_system
+parent_strategy_id: null
+freeze_date: '2026-09-11'
+freeze_baseline_sha: '0000000000000000000000000000000000000000'
+authority_class: owner_authority_and_canonical_strategy_definition
+effective_from: null
+effective_to: null
+supersedes: null
+evidence_refs:
+- evidence_id: definition.ict-liquidity
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier2_canonical_strategy_definition
+- evidence_id: trade.ict.ob-mss
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.ict.sr-flip
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.ict.mss-retest
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.ict.support-mss
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+- evidence_id: trade.ict.bos-retest
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier3_repeated_pre_trade_history
+rule_surface:
+  identity: Synthetic example text; replace with your own strategy definition.
+  context: Synthetic example text; replace with your own strategy definition.
+  direction: Synthetic example text; replace with your own strategy definition.
+  timeframe: Synthetic example text; replace with your own strategy definition.
+  prerequisites: Synthetic example text; replace with your own strategy definition.
+  setup_sequence: Synthetic example text; replace with your own strategy definition.
+  entry_trigger: Synthetic example text; replace with your own strategy definition.
+  invalidation: Synthetic example text; replace with your own strategy definition.
+  target_exit: Synthetic example text; replace with your own strategy definition.
+  disqualifiers: Synthetic example text; replace with your own strategy definition.
+entry_logic:
+  mode: any_of
+  alternatives:
+  - order_block
+  - support_resistance_flip
+  - mss_rejection
+  - bos_retest
+  - support_retest
+  - ob_mss
+unresolved:
+- item_id: ict.expression_specific_thresholds
+  claim_class: UNRESOLVED
+  status: unresolved
+  blocking: false
+  eligibility_impact: false
+  decision_packet: Synthetic example text; replace with your own strategy definition.
+rules:
+- rule_id: ict_liquidity.identity
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: ict_liquidity
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule ict_liquidity.identity.
+  evidence_refs:
+  - definition.ict-liquidity
+  - trade.ict.ob-mss
+  - trade.ict.sr-flip
+- rule_id: ict_liquidity.entry_expression
+  category: setup
+  required: true
+  operator: in
+  operands:
+    field: strategy.variant
+    values:
+    - ob
+    - sr
+    - sr-flip
+    - mss-rejection
+    - bos-retest
+    - support-retest
+    - ob-mss
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule ict_liquidity.entry_expression.
+  evidence_refs:
+  - definition.ict-liquidity
+  - trade.ict.ob-mss
+  - trade.ict.sr-flip
+  - trade.ict.mss-retest
+  - trade.ict.bos-retest
+- rule_id: ict_liquidity.structure_confirmation
+  category: confirmation
+  required: false
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: mss
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: OPTIONAL/CONFIRMATION
+  statement: Synthetic example rule ict_liquidity.structure_confirmation.
+  evidence_refs:
+  - trade.ict.mss-retest
+  - trade.ict.support-mss
+  - trade.ict.bos-retest
+- rule_id: ict_liquidity.invalidation
+  category: risk
+  required: true
+  operator: exists
+  operands:
+    field: plan.stop_loss_price
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: RISK/INVALIDATION
+  statement: Synthetic example rule ict_liquidity.invalidation.
+  evidence_refs:
+  - trade.ict.ob-mss
+  - trade.ict.sr-flip
+  - trade.ict.mss-retest
+- rule_id: ict_liquidity.target
+  category: exit
+  required: true
+  operator: exists
+  operands:
+    field: plan.target_price
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: TARGET/EXIT
+  statement: Synthetic example rule ict_liquidity.target.
+  evidence_refs:
+  - trade.ict.sr-flip
+  - trade.ict.mss-retest
+  - trade.ict.bos-retest

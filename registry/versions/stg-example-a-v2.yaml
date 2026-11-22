@@ -1,0 +1,179 @@
+version_id: stg-example-a:v2
+rule_version: stg-example-a:v2
+schema_version: strategy-rule-version.v1
+status: active
+strategy_id: stg-example-a
+lifecycle_at_freeze: active
+classification: independent_system
+parent_strategy_id: null
+freeze_date: '2026-10-13'
+freeze_baseline_sha: '0000000000000000000000000000000000000000'
+authority_class: owner_approved_scope_expansion_and_active_adoption
+effective_from: '2026-10-12'
+effective_to: null
+supersedes: stg-example-a:v1
+evidence_refs:
+- evidence_id: owner.example_a_spec
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: pre_trade
+  tier: Tier1_owner_research_baseline
+- evidence_id: owner.example_a_instrument_scope_and_adoption
+  source_ref: examples/strategy-definition.md
+  locator: synthetic
+  timing: execution
+  tier: Tier1_owner_decision
+rule_surface:
+  identity: Synthetic example text; replace with your own strategy definition.
+  context: Synthetic example text; replace with your own strategy definition.
+  direction: Synthetic example text; replace with your own strategy definition.
+  timeframe: Synthetic example text; replace with your own strategy definition.
+  prerequisites: Synthetic example text; replace with your own strategy definition.
+  setup_sequence: Synthetic example text; replace with your own strategy definition.
+  entry_trigger: Synthetic example text; replace with your own strategy definition.
+  invalidation: Synthetic example text; replace with your own strategy definition.
+  target_exit: Synthetic example text; replace with your own strategy definition.
+  disqualifiers: Synthetic example text; replace with your own strategy definition.
+research_spec_label: Synthetic example rule version
+unresolved:
+- item_id: example_a.timezone_dst
+  claim_class: CONTEXT
+  status: unresolved
+  blocking: false
+  eligibility_impact: false
+  decision_packet: Synthetic example text; replace with your own strategy definition.
+- item_id: example_a.intrabar_spread_execution
+  claim_class: EXECUTION
+  status: unresolved
+  blocking: false
+  eligibility_impact: false
+  decision_packet: Synthetic example text; replace with your own strategy definition.
+rules:
+- rule_id: example_a.direction_locked
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_owner_pre_asian_structure_bias
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule example_a.direction_locked.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.range_frozen
+  category: setup
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_asian_range_confirmed
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule example_a.range_frozen.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.first_entry
+  category: trigger
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_fib_0618_first_touch
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: REQUIRED
+  statement: Synthetic example rule example_a.first_entry.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.initial_stop
+  category: risk
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_first_stop_fib_1
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: RISK/INVALIDATION
+  statement: Synthetic example rule example_a.initial_stop.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.conditional_retry
+  category: trigger
+  required: false
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_retry_conditional
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: EXECUTION
+  statement: Synthetic example rule example_a.conditional_retry.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.first_target
+  category: exit
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_tp1_fib_0
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: TARGET/EXIT
+  statement: Synthetic example rule example_a.first_target.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.second_target
+  category: exit
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_tp2_owner_liquidity
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: TARGET/EXIT
+  statement: Synthetic example rule example_a.second_target.
+  evidence_refs:
+  - owner.example_a_spec
+- rule_id: example_a.expiry
+  category: risk
+  required: true
+  operator: tag_present
+  operands:
+    field: strategy.setup_tags
+    value: example_a_next_asian_expiry
+  allowed_evidence_timing:
+  - pre_trade
+  evidence_requirements:
+  - manual_note
+  - chart_snapshot
+  claim_class: RISK/INVALIDATION
+  statement: Synthetic example rule example_a.expiry.
+  evidence_refs:
+  - owner.example_a_spec

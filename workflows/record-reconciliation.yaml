@@ -1,0 +1,473 @@
+version: 1
+workflow_id: record_reconciliation
+authority: trading-record
+status: operational
+acceptance:
+  canonical_lifecycle_e2e:
+    status: passed
+    meaning: >-
+      T000006 owner-trade acceptance passed through canonical capture,
+      lifecycle reconciliation, verified exit, provider P&L verification and
+      governed review. This acceptance does not claim projection closure.
+  projection_product_visible_closure:
+    status: passed
+    target_trade: T000006
+    meaning: >-
+      T000006 is present in canonical state, analytics read-model and Trade
+      View, with the canonical lifecycle → analytics → health → Trade View →
+      handoff digest chain verified. Remote-main persistence and exact origin/main object read-back are
+      separate final workflow gates below.
+purpose: >-
+  Execute the Project-owned canonical reconciliation for one trade after the
+  owner-facing registration workflow has fixed the semantic interpretation.
+  Validate the confirmed Registration Packet and provider/canonical integrity,
+  then persist the existing Trading Record V1 lifecycle without reopening review.
+
+architecture:
+  kind: workflow_over_existing_system
+  owner_facing: false
+  invoked_by: workflows/registration-execution.yaml
+  new_state_model: false
+  lifecycle_state_model_change: existing_lifecycle_extension
+  parallel_state_model: false
+  lifecycle_authority: trading_os.operational_lifecycle.LifecycleStore
+  capture_facade: trading_os.unified_capture
+  cli: python -m trading_os
+  canonical_projection: canonical/lifecycle/current.json
+
+authority_invariants:
+  evidence_provenance_is_not_admissibility: true
+  provider_execution_authority: execution_identity_entry_exit_timestamps_prices_close_state_and_pnl
+  owner_historical_intent_authority: primary_strategy_optional_defined_expression_confluences_original_plan_or_no_setup
+  agent_authority: chart_observable_facts_consistency_checks_and_registry_mapping
+  agent_may_override_owner_historical_intent: false
+
+invocation_contract:
+  registration_packet_required_when_invoked_by_registration_execution: true
+  required_confirmation_state: confirmed
+  required_semantic_state: frozen
+  semantic_fields_are_read_only:
+    - owner_recollection
+    - owner_judgment
+    - agreed_facts
+    - unresolved_facts
+    - strategy_resolution
+  executor_may:
+    - validate_packet_integrity
+    - validate_evidence_provenance
+    - validate_provider_and_canonical_current_state
+    - fail_closed_on_mismatch
+  executor_must_not:
+    - redo_trade_review
+    - replace_owner_judgment
+    - reinterpret_confirmed_strategy_resolution
+    - silently_change_agreed_or_unresolved_facts
+
+registration_state_contract:
+  invariant: execution_truth_is_independent_from_strategy_attribution_plan_completeness_and_review
+  provider_verified_live_with_unresolved_strategy:
+    canonical_registration: required
+    T_ID: allocated_after_provider_identity_and_entry_verification
+    strategy_id: null
+    strategy_resolution_status: unresolved
+    strategy_stats_eligible: false
+  incomplete_live_plan:
+    registration_blocked: false
+    plan_completeness: partial
+    unknown_values: [unknown, not_observable, null]
+    inference_from_actual_execution: forbidden
+  missing_chart_evidence_blocks_T_ID: false
+  legacy_STRATEGY_PENDING:
+    read_compatibility: retained
+    new_unresolved_attempts_written: false
+
+canonical_amendment_path:
+  purpose: resolve_strategy_attribution_after_LIVE_registration_without_recreating_trade
+  lifecycle_event: strategy_attribution_resolved
+  method: trading_os.operational_lifecycle.LifecycleStore.resolve_strategy_attribution
+  command: >-
+    python -m trading_os capture strategy-attribution --trade-id <trade_id>
+    --resolver-input-file <resolver-input.json> --amendment-id <id>
+    --resolved-at <timestamp> [--reason <reason>]
+  allowed_from: [OPEN, PARTIALLY_CLOSED, CLOSED, REVIEW_PENDING, REVIEWED]
+  eligibility: LIVE trade with current strategy_resolution.status=unresolved
+  evidence:
+    resolver_replayed: true
+    refs_must_be_attached_to_same_trade: true
+    provenance_must_match_resolver_input: true
+    time_model:
+      capture_time: evidence.captured_at_or_provenance.captured_at
+      represented_market_time: evidence.represented_market_time.start_and_end
+      evidence_timing: true_timing_relative_to_trade
+      retrospective_capture_mode: retrospective_replay
+      retrospective_role: historical_market_reconstruction
+      missing_capture_or_market_time: preserve_as_not_observable
+      timing_and_admissibility_are_distinct: true
+    retrospective_owner_attestation:
+      timing: retrospective
+      positive_and_no_setup_paths: one_first_class_schema
+      primary_strategy: required_and_validated_against_active_frozen_registry
+      entry_expression: optional_and_validated_when_defined_by_the_selected_strategy
+      strategies_without_expression_dimension: resolve_without_fake_entry_expression
+      confluences: preserved_as_secondary_context
+      visual_evidence_admissibility: post_trade_replay_is_admissible_for_reconstruction
+      visual_provenance: preserve_actual_category_and_timing
+      chronology:
+        compare_attested_trigger_event_time_to_provider_entry_time_when_both_known: true
+        unknown_timing: compatible_at_reduced_confidence
+        represented_interval_must_cover_provider_entry: false
+        trigger_after_provider_entry: material_conflict_keep_unresolved_and_request_owner_clarification
+      contradiction_contract:
+        contradiction_code: required
+        observed_fact: required_exact_owner_facing_fact
+        evidence_refs: required_attached_visual_or_provider_refs
+        trigger_after_provider_entry_requires_verified_provider_timestamp: true
+      plan_facts:
+        owner_recollection_is_preserved: true
+        conflict_with_frozen_plan: material_conflict
+    later_retrospective_attribution_amendment:
+      event: strategy_attribution_resolved
+      authority_snapshot_location: payload.amendment.authority
+      required_authority_fields:
+        - strategy_id
+        - rule_version
+        - retrospective_attribution_registry_version
+        - retrospective_attribution_registry_digest
+      append_only_snapshot: true
+      current_registry_mutation_rewrites_prior_snapshot: false
+  immutable:
+    - trade_id
+    - trade_no
+    - provider_identity_link
+    - registration_packet_sha256
+    - finalized_canonical_trade
+    - prior_lifecycle_events
+  duplicate_trade_creation: forbidden
+
+persistence_policy:
+  owner: trading-record
+  default_effect_class: PROJECT_RUNTIME_WRITE
+  unknown_effect:
+    effect_class: REPO_CHANGE
+    delivery: pull_request
+    fail_closed: true
+  lanes:
+    routine_record:
+      effect_class: PROJECT_RUNTIME_WRITE
+      delivery: direct_main
+      pr_required: false
+      direct_main_gates:
+        - fresh_origin_main
+        - clean_managed_worktree_before_mutation
+        - only_routine_record_artifacts_changed
+        - provider_execution_identity_verified_when_applicable
+        - dedupe_and_lifecycle_identity_checks_pass
+        - governed_sequence_allocator_passes
+        - lifecycle_state_valid
+        - required_evidence_linkage_valid
+        - projection_refresh_succeeds
+        - projection_verification_current
+        - target_visible_in_required_read_models
+        - required_tests_pass
+        - pre_push_fetch_origin_main
+        - pre_push_origin_main_matches_mutation_base
+        - no_system_change_surface_changed
+        - no_unresolved_merge_conflict_or_concurrency_condition
+      persistence_path:
+        - "fresh origin/main"
+        - "record reconciliation"
+        - "projection refresh (returns embedded verify result)"
+        - "required test lane selected by registration-execution.yaml#test_policy"
+        - "commit"
+        - "pre-push fetch/check origin/main"
+        - "push origin/main"
+        - "fresh-main read-back from exact origin/main objects (no second checkout required)"
+        - "clean worktree"
+      completion_requires:
+        - remote_main_contains_completed_state
+        - fresh_main_read_back
+        - worktree_clean
+    system_change:
+      effect_class: REPO_CHANGE
+      delivery: pull_request
+      pr_required: true
+      triggers:
+        - "trading_os/**"
+        - "registry/**"
+        - "workflows/**"
+        - "tests/**"
+        - "AUTHORITY.md"
+        - "SKILL.md"
+        - "STATUS.md"
+        - "PROJECT_CONTEXT.md"
+        - "REVIEW_RULES.md"
+        - "STRATEGIES_OVERVIEW.md"
+        - schema_or_vocabulary_change
+        - lifecycle_or_state_machine_change
+        - migration
+        - allocator_or_sequence_implementation_change
+        - provider_integration_behavior_change
+        - analytics_calculation_logic_change
+        - uncertain_effect
+        - missing_system_capability
+  routine_artifact_allowlist:
+    - "canonical/drafts/**"
+    - "canonical/records/trades/**"
+    - "canonical/sequences/numbers.json"
+    - "canonical/sequences/finalizations.json"
+    - "canonical/lifecycle/events.jsonl"
+    - "canonical/lifecycle/identity-links.jsonl"
+    - "canonical/lifecycle/current.json"
+    - "canonical/evidence/artifacts/**"
+    - "canonical/registration/**"
+    - "provider-ledgers/propw/registration-census.json"
+    - "exports/operational/**"
+    - "PERFORMANCE.md"
+    - "Research/backtest-candidates/**"
+  forbidden_routine_surfaces:
+    - "trading_os/**"
+    - "registry/**"
+    - "workflows/**"
+    - "tests/**"
+    - "AUTHORITY.md"
+    - "SKILL.md"
+    - "STATUS.md"
+    - "PROJECT_CONTEXT.md"
+    - "REVIEW_RULES.md"
+    - "STRATEGIES_OVERVIEW.md"
+
+routing_contract:
+  owner_routable: false
+  only_invoked_by: workflows/registration-execution.yaml
+  rule: >-
+    Owner-facing "register/backfill/record a trade" requests must route through
+    workflows/trade-registration.yaml first. No agent may enter record_reconciliation
+    directly from owner natural language or from a handoff package.
+
+invariants:
+  - External resolvers / agents resolve Project Authority only and must delegate to this Project-owned workflow; they must not mirror this workflow or reproduce its semantics.
+  - Do not invent provider facts, prices, timestamps, strategy identity, review facts, or psychology.
+  - When invoked by registration_execution, require an owner-confirmed frozen Registration Packet before any trade draft/identity/T-number mutation.
+  - A confirmed Registration Packet is semantic input, not a suggestion — execution validates it but does not redo review or strategy interpretation.
+  - If the packet conflicts with current provider/canonical integrity or cannot be executed under current contracts, fail closed and return the blocker; do not silently rewrite the packet.
+  - Prefer evidence, registry, provider read-only facts, and canonical state over asking the owner again.
+  - Ask only for facts that cannot be observed, derived, or safely represented as unknown/not_observable.
+  - Retrospective fact time and durable recorded_at are separate.
+  - LIVE provider execution authority requires real provider execution evidence.
+  - LIVE strategy attribution may be unresolved and LIVE plan completeness may be partial without blocking T-ID allocation; provider identity and entry verification still gate finalization.
+  - Existing lifecycle transitions remain authoritative; this workflow may not bypass them.
+  - A runtime write must stay inside the Project-declared runtime write contract.
+  - Read back canonical state after writes before claiming completion.
+  - Any canonical lifecycle or canonical trade mutation requires same-turn projection closure.
+  - Generated projections are refreshed by `python -m trading_os projections refresh`; owner confirmation is not a prerequisite.
+  - Any dependency digest mismatch or missing target visibility is `PROJECTION_STALE` and fail-closed.
+  - Final `COMPLETE` requires completed state in remote `origin/main` and a fresh-main read-back; a local commit alone is insufficient. The read-back may use fetched origin/main Git objects instead of a second checkout only when the fetched ref equals the pushed commit and canonical, lifecycle, evidence, packet, projections, manifests and target visibility are read from that exact tree.
+
+mode_resolution:
+  live_contemporaneous:
+    when: Real order, reported near the time of execution.
+    capture: python -m trading_os capture live
+  live_retrospective:
+    when: Real order, reported after the fact through registration_execution.
+    capture: >-
+      python -m trading_os capture retrospective-live --registration-packet-file
+      <canonical/registration/packets/packet_sha.json>
+    strategy_contract: >-
+      Consume the already validated frozen strategy_resolution directly. Do not invoke
+      resolve_live_strategy and do not enrich resolver_input with SL/TP plan facts.
+  backtest:
+    when: No real order; owner explicitly wants a backtest/sample record.
+    capture: python -m trading_os capture backtest
+
+workflow:
+  - id: resolve_mode
+    action: Determine LIVE vs BACKTEST and contemporaneous vs retrospective from owner facts.
+  - id: gather_known_facts
+    action: >-
+      Consume the owner-confirmed frozen Registration Packet, provider read-only evidence,
+      strategy registry, and canonical state. Validate current integrity; preserve packet
+      unknown/not_observable facts instead of reinterpreting them.
+  - id: validate_registration_packet
+    action: >-
+      Verify owner confirmation, packet version/semantic freeze, evidence identities, and
+      the confirmed resolver output against current executable contracts. Do not run a new
+      semantic strategy review. If execution requires changing confirmed semantics, stop
+      and return to the owner-facing trade_registration confirmation gate.
+  - id: ingest_evidence
+    action: >-
+      Ingest durable evidence with python -m trading_os evidence ingest as needed.
+      Keep chart/context evidence separate from provider execution authority.
+  - id: capture_entry
+    action: >-
+      Use the matching Unified Capture command. For historical registration, pass the
+      persisted frozen Registration Packet so Unified Capture consumes the validated
+      strategy_resolution directly. Never fall back to --strategy-observations-file for
+      an Owner-confirmed frozen packet. Do not rebuild draft/evidence/identity/
+      verification/finalization orchestration outside the existing facade.
+  - id: reconcile_exit
+    condition: Owner reports the trade as partially or fully closed.
+    branches:
+      partial_close:
+        when: Owner reports only a partial exit and the position remains open.
+        allowed_from_states: [OPEN, PARTIALLY_CLOSED]
+        steps:
+          - partial-close
+          - read-back
+        resulting_state: PARTIALLY_CLOSED
+        verify_exit: forbidden
+        completion: CAPTURED
+      final_close:
+        when: Owner reports that the position is fully closed.
+        allowed_from_states: [OPEN, PARTIALLY_CLOSED]
+        steps:
+          - final-close
+          - attach/resolve-exit-evidence
+          - verify-exit
+          - read-back
+        resulting_state: CLOSED
+        requires:
+          - canonical_state: CLOSED
+          - exit_verification_state: confirmed
+        completion: LIFECYCLE_RECONCILED
+  - id: review
+    condition: invoked explicitly from workflows/single-trade-review.yaml, never from registration_execution.
+    gate:
+      required_canonical_states: [CLOSED, REVIEW_PENDING, REVIEWED]
+      required_exit_verification_state: confirmed
+      required_review_facts: sufficient
+      if_not_closed: do_not_review
+      if_exit_verification_not_confirmed: reconcile_exit_first
+    action: >-
+      Write the existing governed post-trade review only for the separate review path.
+      Registration execution leaves review.status=not_started and must not manufacture review facts.
+  - id: refresh_projections
+    condition: Canonical lifecycle changed.
+    action: >-
+      Run the Project-owned projection closure command in the same turn. It
+      composes existing implementations in deterministic order:
+      analytics refresh, health refresh, Trade View rebuild, handoff refresh,
+      then machine-verifiable freshness and target-trade visibility checks.
+      Generated projections remain derived and must never be hand edited.
+    command: python -m trading_os projections refresh --target-trade <trade_id>
+    sequence: [analytics, health, trade_view, handoff, verify]
+    owner_confirmation_required: false
+    failure: PROJECTION_STALE
+  - id: read_back
+    action: >-
+      Read canonical/lifecycle/current.json, the canonical trade record, all
+      four projection artifacts and their manifests to verify the durable state
+      reached by this run before returning a completion receipt.
+  - id: persistence_and_fresh_main_read_back
+    condition: The owner requested a complete recorded trade and no owner-only blocker remains.
+    action: >-
+      Classify the effect before persistence. A routine record that satisfies
+      every direct_main gate may commit and push directly to origin/main. Immediately
+      before push, fetch origin/main again and verify it still equals the mutation
+      base used for this run. If origin/main advanced, do not push the stale result:
+      replay/reconcile the routine mutation onto fresh origin/main, rerun projection
+      refresh (which embeds verify) and the deterministically selected required tests,
+      then repeat the pre-push check. A system
+      change or unknown effect must use the pull-request lane and merge before
+      completion. In either lane verify origin/main contains the completed canonical
+      and projection state, then read back the exact fetched origin/main tree. A second
+      checkout is unnecessary only when origin/main equals the pushed commit SHA and
+      `git show origin/main:<path>` verifies the canonical record, lifecycle, provider
+      identity link, packet, EvidenceStore bytes and every projection artifact/manifest;
+      run projection-chain and target-visibility verification against that same immutable
+      commit tree before returning. Do not report COMPLETE from a local branch or local
+      commit alone.
+
+completion_gate:
+  final_status: COMPLETE
+  incomplete_status: INCOMPLETE
+  stale_status: PROJECTION_STALE
+  required:
+    canonical:
+      durable: true
+      validated: true
+      read_back: true
+    projections:
+      analytics_current: true
+      health_current: true
+      trade_view_current: true
+      handoff_current: true
+      freshness_verified: true
+    target_trade:
+      canonical_present: true
+      analytics_present: true
+      trade_view_present: true
+    persistence:
+      committed: true
+      remote_main_contains_completed_state: true
+      fresh_main_read_back: true
+      delivery_lanes:
+        routine_record:
+          delivery: direct_main
+          remote_persistence: push_origin_main
+          fresh_main_read_back: true
+          worktree_clean: true
+        system_change:
+          delivery: pull_request_then_merge
+          remote_persistence: merge_into_origin_main
+          fresh_main_read_back: true
+          worktree_clean: true
+    hygiene:
+      worktree_clean: true
+  fail_closed:
+    - canonical mutation without projection closure
+    - PROJECTION_STALE
+    - target trade missing from analytics or Trade View
+    - completed runtime state absent from origin/main
+    - fresh-main read-back not performed or mismatched
+    - origin/main advanced during routine run without replay/revalidation
+    - system change not merged into origin/main
+
+completion:
+  CAPTURED:
+    means: Canonical trade exists and entry-side lifecycle is durably recorded.
+  LIFECYCLE_RECONCILED:
+    means: >-
+      All owner-known entry/exit facts for this trade are recorded and required
+      verifications that can be satisfied from available evidence are complete.
+      A fully closed trade requires canonical_state=CLOSED and
+      exit_verification_state=confirmed; a pending final exit verification must
+      not be reported as LIFECYCLE_RECONCILED.
+  REVIEWED:
+    means: Governed review is also complete.
+  COMPLETE:
+    means: >-
+      The completion_gate is fully satisfied, including projection freshness,
+      target-trade visibility, remote-main persistence and fresh-main read-back.
+  INCOMPLETE:
+    means: >-
+      A lifecycle milestone exists, but at least one completion_gate assertion
+      is not proven. Canonical completion with stale projections is incomplete.
+  NEEDS_OWNER_FACTS:
+    means: >-
+      A required fact cannot be observed, derived, or safely represented as
+      unknown/not_observable. Ask only for those specific missing facts.
+  BLOCKED:
+    means: >-
+      Authority, evidence, lifecycle, or validation rules reject progress. Return the
+      concrete blocker; do not route around it.
+
+agent_execution:
+  same_turn_continue: true
+  stop_for_user_only_when:
+    - completion is NEEDS_OWNER_FACTS
+    - completion is BLOCKED and only the owner can resolve it
+  receipt_fields:
+    - workflow_id
+    - mode
+    - trade_id
+    - trade_no
+    - canonical_state
+    - entry_verification
+    - exit_verification
+    - review_state
+    - missing_facts
+    - blockers
+    - next_safe_action
+    - completion_gate
+    - projection_verification
+    - persistence_verification

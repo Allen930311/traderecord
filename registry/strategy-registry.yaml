@@ -1,0 +1,156 @@
+registry_version: strategy-registry.v1
+strategies:
+- strategy_id: stg-vegas-tunnel
+  display_name: Vegas Tunnel
+  legacy_number: 1
+  classification: independent_system
+  status: active
+  legacy_aliases:
+  - vegas-tunnel
+  - 1-vegas-tunnel
+  - vt-long
+  - vt-short
+  - vegas-retest
+  - mss-vt
+  - mss-vt-short
+  - 2-mss-vegas
+  - mss-vegas
+  - mss-vt-long
+  - mss-bos-vegas
+  - dual-channel-retest
+  rule_versions:
+  - stg-vegas-tunnel:v1
+- strategy_id: stg-po3
+  display_name: PO3 / Power of 3
+  classification: independent_system
+  status: active
+  legacy_aliases:
+  - po3
+  rule_versions:
+  - stg-po3:v1
+- strategy_id: stg-example-a
+  display_name: Example Strategy A
+  classification: independent_system
+  status: active
+  legacy_aliases:
+  - example-a
+  rule_versions:
+  - stg-example-a:v2
+- strategy_id: stg-example-b
+  display_name: Example Strategy B
+  legacy_number: 11
+  classification: independent_system
+  status: retired
+  retired_on: '2026-09-09'
+  legacy_aliases:
+  - example-b
+  rule_versions:
+  - stg-example-b:v1
+- strategy_id: stg-ict-liquidity
+  display_name: ICT 指標流動性 (Liquidity models)
+  legacy_number: null
+  classification: independent_system
+  status: active
+  variants:
+  - triple-tap
+  - sweep-mss-ob
+  legacy_aliases:
+  - sr
+  - sr-flip
+  - mss-rejection
+  - bos-retest
+  - support-retest
+  - OB + MSS
+  - ob
+  rule_versions:
+  - stg-ict-liquidity:v1
+- strategy_id: stg-triple-tap
+  display_name: Triple Tap (+ RSI divergence + MSS)
+  legacy_number: 8
+  classification: variant
+  parent_strategy_id: stg-ict-liquidity
+  status: active
+  legacy_aliases:
+  - triple-tap
+  - 8-triple-tap
+  - triple_tap
+  rule_versions:
+  - stg-triple-tap:v1
+- strategy_id: stg-liq-sweep
+  display_name: Liquidity Sweep + MSS + OB
+  legacy_number: 4
+  classification: variant
+  parent_strategy_id: stg-ict-liquidity
+  status: retired
+  retired_on: '2026-09-09'
+  legacy_aliases:
+  - liq-sweep
+  - 4-liq-sweep
+  - liq_sweep
+  - sweep-mss-ob
+  rule_versions: []
+- strategy_id: stg-17ema
+  display_name: 17 EMA Historical Experiment
+  legacy_number: null
+  classification: experimental
+  status: experimental
+  legacy_aliases:
+  - 17ema
+  rule_versions: []
+- strategy_id: stg-ma-cluster
+  display_name: MA Cluster Historical Experiment
+  legacy_number: null
+  classification: experimental
+  status: experimental
+  legacy_aliases:
+  - ma-cluster
+  rule_versions: []
+- strategy_id: stg-fib-rsi
+  display_name: Fib-RSI Historical Experiment
+  legacy_number: null
+  classification: experimental
+  status: experimental
+  legacy_aliases:
+  - fib-rsi
+  rule_versions: []
+- strategy_id: stg-unicorn
+  display_name: Unicorn / 獨角獸 Historical Experiment
+  legacy_number: null
+  classification: experimental
+  status: experimental
+  legacy_aliases:
+  - unicorn
+  rule_versions: []
+- strategy_id: stg-ifvg-mss
+  display_name: IFVG + OB + MSS
+  legacy_number: null
+  classification: independent_system
+  status: retired
+  retired_on: '2026-09-09'
+  legacy_aliases:
+  - ifvg-mss
+  - IFVG-OB-MSS
+  - ifvg
+  rule_versions: []
+- strategy_id: stg-ott-auto
+  display_name: OTT Auto (MSS + OTT counter-trend)
+  legacy_number: null
+  classification: independent_system
+  status: retired
+  retired_on: '2026-09-09'
+  legacy_aliases:
+  - ott-auto
+  - MSS_OTT
+  - ott
+  rule_versions: []
+- strategy_id: stg-1272-fakeout
+  display_name: 1.272 Fakeout + RSI
+  legacy_number: 6
+  classification: independent_system
+  status: retired
+  retired_on: '2026-09-09'
+  legacy_aliases:
+  - 1272-fakeout
+  - 6-1272-fakeout
+  - 1272_fakeout
+  rule_versions: []

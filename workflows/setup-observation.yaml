@@ -1,0 +1,45 @@
+workflow_id: setup_observation
+version: 1
+purpose: >-
+  Keep a setup that was worth recording but was NOT executed (missed, skipped, risk-limited,
+  or invalidated). The result is an obs_* canonical observation. It is not a trade.
+
+owner_routes:
+  - "這裡有個很好的 setup 但我沒下"
+  - "記一下這個沒進的 VT"
+
+invariants:
+  - An observation never receives a T-number, draft, identity link, provider binding, or lifecycle event.
+  - Observations are never read by analytics, health, or Trade View performance; they cannot enter a win rate, R total, or LIVE sample.
+  - At least one owner chart image is required; its exact original bytes go through EvidenceStore (SHA-256, deduped) before anything is written.
+  - The mandatory strategy resolver runs on every observation. All four outcomes (MATCHED, NO_MATCH, AMBIGUOUS, INSUFFICIENT_EVIDENCE) can be stored; the resolver result is kept on the observation, and strategy_resolution is set only when it is MATCHED or NO_MATCH.
+  - Every rule observation's evidence_refs must resolve to THIS observation's saved evidence (artifact sha256 / locator / file name) and its timing must equal the saved evidence timing; refs that match nothing saved fail closed.
+  - observed_at (when the setup happened) and recorded_at (now) are distinct. recording_timing (contemporaneous | retrospective) and evidence_timing are required, with no default. A retrospective observation cannot claim pre_trade evidence without an accepted Owner evidence adjudication (--pre-trade-adjudication-id) naming the saved images; a MATCH from retrospective evidence is recorded as replay_reconstructed, never contemporaneous_confirmed.
+  - reason_not_taken is a fixed vocabulary — missed, skipped, risk_limit, invalidated, other (other requires reason_note).
+  - The same setup (symbol, direction, observed_at, evidence SHA set) is recorded once; re-recording returns the existing obs_id.
+  - An observation is not a Backtest. The observation and manual replay/backtest research stay in Trading Record; executable strategy or tool development goes to Crypto only on the Owner's explicit request.
+
+research_authority:
+  destination: Trading Record Research
+  external_executable_development_handoff:
+    destination: example-owner/crypto
+    requires_explicit_owner_request: true
+    allowed_scope: executable_strategy_or_tool_development_only
+
+entrypoint:
+  command: python -m trading_os observe
+  module: trading_os/setup_observation.py
+  canonical_write: CanonicalWriter.record_observation -> canonical/records/observations/obs_<uuid7>.json
+  required_inputs:
+    - --symbol, --direction, --observed-at, --timeframe-context, --timeframe-trigger
+    - --reason-not-taken
+    - --recording-timing (contemporaneous | retrospective) and --evidence-timing (no defaults)
+    - --evidence-file (repeatable, at least one)
+    - --strategy-observations-file (resolver input, see workflows/trade-registration.yaml)
+  optional_inputs:
+    - --setup-quality (good | fair | poor | unknown)
+    - --reason-note, --thesis, --evidence-timing
+
+completion:
+  RECORDED: An obs_* record exists with evidence SHA, resolver result, and reason_not_taken; no trade state changed.
+  BLOCKED: No evidence image, invalid vocabulary, or malformed resolver observations; nothing is written.
