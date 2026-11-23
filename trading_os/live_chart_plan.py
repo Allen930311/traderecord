@@ -12,7 +12,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 R_BASIS = "actual_entry_to_chart_stop"
-PROVENANCE = {"chart_annotation", "chart_estimate"}
+PROVENANCE = {"chart_annotation", "chart_estimate", "app_drawn"}
+# app_drawn (Allen, 2026-11-23): levels the Owner drew in the chart planner app BEFORE the trade.
+# Evidence is the saved plan id, not an attached image, so the screenshot rules below stay as they were;
+# instead the plan must be provably saved before the provider entry (plan_created_at < provider_entry_time).
+APP_DRAWN = "app_drawn"
 
 
 class LiveChartPlanError(ValueError):
@@ -29,6 +33,15 @@ def _price(value: Any, name: str) -> Decimal:
     if not result.is_finite() or result <= 0:
         raise LiveChartPlanError(f"{name} must be a finite positive price")
     return result
+
+
+def _require_drawn_before_entry(created_at: Any, entry_time: Any) -> None:
+    """app_drawn rule (Allen, 2026-11-23): a plan only counts if it was saved before the fill."""
+    for label, value in (("plan_created_at", created_at), ("provider_entry_time", entry_time)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise LiveChartPlanError(f"app_drawn needs {label} as epoch seconds")
+    if created_at >= entry_time:
+        raise LiveChartPlanError("app_drawn plan was saved at or after the provider entry; use a screenshot instead")
 
 
 def measure_r(
@@ -67,6 +80,7 @@ def derive_live_chart_plan(
     provider_entry_price: Any | None = None,
     provider_exit_price: Any | None = None,
     attached_refs: set[str] | None = None,
+    provider_entry_time: Any | None = None,
 ) -> dict[str, Any]:
     """Return canonical_capture plan fields derived from chart prices.
 
@@ -85,12 +99,17 @@ def derive_live_chart_plan(
         if not isinstance(item, Mapping):
             raise LiveChartPlanError(f"chart.{name} needs value, provenance and evidence_ref")
         if item.get("provenance") not in PROVENANCE:
-            raise LiveChartPlanError(f"chart.{name} provenance must be chart_annotation or chart_estimate")
+            raise LiveChartPlanError(f"chart.{name} provenance must be chart_annotation, chart_estimate or app_drawn")
         ref = item.get("evidence_ref")
-        if not isinstance(ref, str) or not ref.strip():
-            raise LiveChartPlanError(f"chart.{name} needs the attached image evidence_ref")
-        if attached_refs is not None and ref not in attached_refs:
-            raise LiveChartPlanError(f"chart.{name} evidence_ref is not an attached image")
+        if item["provenance"] == APP_DRAWN:
+            if not isinstance(ref, str) or not ref.startswith("plan:") or not ref[5:].strip():
+                raise LiveChartPlanError(f"chart.{name} app_drawn needs evidence_ref 'plan:<saved plan id>'")
+            _require_drawn_before_entry(chart.get("plan_created_at"), provider_entry_time)
+        else:
+            if not isinstance(ref, str) or not ref.strip():
+                raise LiveChartPlanError(f"chart.{name} needs the attached image evidence_ref")
+            if attached_refs is not None and ref not in attached_refs:
+                raise LiveChartPlanError(f"chart.{name} evidence_ref is not an attached image")
         levels[name] = _price(item.get("value"), f"chart.{name}")
         evidence[name] = {"provenance": item["provenance"], "evidence_ref": ref}
 

@@ -349,7 +349,7 @@ def test_runtime_live_chart_plan_contract_alignment() -> None:
     assert _resolve_python_symbol(plan_cfg["helper"]) is derive_live_chart_plan
 
     assert R_BASIS == "actual_entry_to_chart_stop"
-    assert PROVENANCE == {"chart_annotation", "chart_estimate"}
+    assert PROVENANCE == {"chart_annotation", "chart_estimate", "app_drawn"}
 
     # Check REVIEW_RULES.md §2 & §4 include matching provenance, formulas, and helper link.
     sec2 = review_rules[review_rules.index("## 2."):review_rules.index("## 3.")]

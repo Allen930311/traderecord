@@ -10,3 +10,6 @@ venv/
 canonical/records/
 canonical/evidence/
 provider-ledgers/
+
+# chart_planner local drafts
+chart_planner/plans/
