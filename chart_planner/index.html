@@ -1,0 +1,81 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Chart Planner</title>
+<style>
+:root{--bg:#10141a;--fg:#e6edf3;--mut:#8b98a5;--line:#2a3340;--ent:#4da3ff}
+@media(prefers-color-scheme:light){:root{--bg:#fff;--fg:#14202b;--mut:#5b6b7a;--line:#d5dde5}}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--line)}
+select,button{background:transparent;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:5px 10px;font:inherit}
+button{cursor:pointer}button.pri{border-color:var(--ent);color:var(--ent)}button:disabled{opacity:.4;cursor:default}
+#chart{flex:1;min-height:0}
+#term{height:36vh;border-top:1px solid var(--line);display:none;flex-direction:column;background:#000}
+#term.on{display:flex}
+#tbar{display:flex;gap:8px;align-items:center;padding:4px 16px;background:var(--bg);color:var(--mut)}
+#tbox{flex:1;min-height:0;padding:4px 8px;overflow:hidden;position:relative}
+footer{padding:8px 16px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:16px;color:var(--mut)}
+b{color:var(--fg)}#msg{margin-left:auto}
+</style></head><body>
+<header>
+<select id="sym"><option>BTC-USDT</option><option>ETH-USDT</option><option>SOL-USDT</option></select>
+<select id="iv"><option>5m</option><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select>
+<button id="cl">Claude</button><button id="cx">Codex</button><button id="fl">成交紀錄</button><button id="chk">核對成交</button><button id="place">放置計畫</button><button id="save" class="pri" disabled>儲存計畫</button><button id="clear" disabled>清除</button>
+<span style="color:var(--mut)">拖曳線條調整價格　資料：BingX 公開行情（唯讀）</span>
+</header>
+<link rel="stylesheet" href="/xterm.css">
+<div id="chart"></div>
+<div id="term"><div id="tbar">
+<button id="feed">把計畫貼給 CLI</button><button id="tclose">關閉</button>
+<span>貼上後不會自動送出，按 Enter 才執行</span></div><div id="tbox"></div></div>
+<footer><span>方向 <b id="dir">—</b></span><span>Entry <b id="e">—</b></span><span>SL <b id="s">—</b></span><span>TP <b id="t">—</b></span><span>計畫 RR <b id="rr">—</b></span><span id="msg"></span><span><a href="https://www.tradingview.com/" target="_blank" rel="noopener" style="color:var(--mut)">Charts by TradingView Lightweight Charts</a></span></footer>
+<script src="/lw.js"></script><script src="/xterm.js"></script><script src="/addon-fit.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const cs=getComputedStyle(document.body);
+const chart=LightweightCharts.createChart($('chart'),{autoSize:true,layout:{background:{color:cs.backgroundColor},textColor:cs.color},grid:{vertLines:{color:'#8883'},horzLines:{color:'#8883'}},timeScale:{timeVisible:true}});
+const series=chart.addCandlestickSeries({upColor:'#22d3a5',downColor:'#ff5b7f',borderVisible:false,wickUpColor:'#22d3a5',wickDownColor:'#ff5b7f'});
+const L={entry:{c:'#4da3ff',t:'Entry'},stop:{c:'#ff5b7f',t:'SL'},target:{c:'#22d3a5',t:'TP'}};
+let plan=null,lines={},drag=null,lastClose=0;
+async function load(){const r=await fetch(`/api/candles?symbol=${$('sym').value}&interval=${$('iv').value}`);const d=await r.json();if(d.error){$('msg').textContent=d.error;return}series.setData(d);lastClose=d[d.length-1].close;chart.timeScale().fitContent()}
+function draw(){for(const k in lines)series.removePriceLine(lines[k]);lines={};if(!plan)return;
+ for(const k in L)lines[k]=series.createPriceLine({price:plan[k],color:L[k].c,lineWidth:2,axisLabelVisible:true,title:L[k].t});show()}
+function show(){const long=plan.target>plan.entry,sg=long?1:-1,risk=(plan.entry-plan.stop)*sg,rew=(plan.target-plan.entry)*sg;
+ $('dir').textContent=long?'LONG':'SHORT';$('e').textContent=plan.entry.toFixed(2);$('s').textContent=plan.stop.toFixed(2);$('t').textContent=plan.target.toFixed(2);
+ const ok=risk>0&&rew>0;$('rr').textContent=ok?(rew/risk).toFixed(3)+'（預覽）':'無效：三條線互相矛盾';$('save').disabled=!ok;$('clear').disabled=false}
+$('place').onclick=()=>{const p=lastClose;plan={entry:p,stop:p*0.99,target:p*1.02};draw()};
+$('clear').onclick=()=>{plan=null;draw();$('save').disabled=true;$('clear').disabled=true;['dir','e','s','t','rr'].forEach(i=>$(i).textContent='—')};
+$('save').onclick=async()=>{const r=await fetch('/api/plan',{method:'POST',body:JSON.stringify({...plan,symbol:$('sym').value,interval:$('iv').value})});const j=await r.json();
+ $('msg').textContent=j.error?('失敗：'+j.error):`已存草稿 ${j.direction} RR ${j.planned_rr}（伺服器以 measure_r 計算）`};
+const el=$('chart');
+el.addEventListener('mousedown',e=>{if(!plan)return;const y=e.clientY-el.getBoundingClientRect().top;
+ for(const k in L){const py=series.priceToCoordinate(plan[k]);if(py!==null&&Math.abs(py-y)<6){drag=k;chart.applyOptions({handleScroll:false,handleScale:false});break}}});
+window.addEventListener('mousemove',e=>{if(!drag)return;const y=e.clientY-el.getBoundingClientRect().top;const p=series.coordinateToPrice(y);if(p===null)return;plan[drag]=p;draw()});
+window.addEventListener('mouseup',()=>{if(drag){drag=null;chart.applyOptions({handleScroll:true,handleScale:true})}});
+let term=null,fit=null,sock=null;
+function openCli(name){
+ $('term').classList.add('on');
+ if(sock){sock.onclose=null;sock.close()}
+ if(!term){term=new Terminal({fontSize:13,cursorBlink:true,theme:{background:'#000'}});fit=new FitAddon.FitAddon();term.loadAddon(fit);term.open($('tbox'));
+  term.onData(d=>{if(sock&&sock.readyState===1)sock.send(d)});
+  let pend=0,lw=0,lh=0;
+  new ResizeObserver(es=>{const r=es[0].contentRect;if(Math.abs(r.width-lw)<2&&Math.abs(r.height-lh)<2)return;lw=r.width;lh=r.height;
+   cancelAnimationFrame(pend);pend=requestAnimationFrame(()=>{fit.fit();if(sock&&sock.readyState===1)sock.send(JSON.stringify({resize:[term.cols,term.rows]}))})}).observe($('tbox'))}
+ term.reset();fit.fit();
+ sock=new WebSocket('ws://127.0.0.1:8766/?cli='+name);
+ sock.onopen=()=>sock.send(JSON.stringify({resize:[term.cols,term.rows]}));
+ sock.onmessage=e=>term.write(e.data);
+ sock.onclose=e=>term.write('\r\n[連線結束'+(e.reason?'：'+e.reason:'')+']\r\n');
+ term.focus()}
+$('cl').onclick=()=>openCli('claude');$('cx').onclick=()=>openCli('codex');
+$('tclose').onclick=()=>{if(sock){sock.onclose=null;sock.close()}$('term').classList.remove('on')};
+$('feed').onclick=()=>{if(sock&&sock.readyState===1)sock.send('請讀 chart_planner/plans/latest.json 這筆交易計畫，並協助我分析。')};
+$('fl').onclick=async()=>{const r=await fetch(`/api/fills?symbol=${$('sym').value}`);const j=await r.json();
+ if(j.error){$('msg').textContent='失敗：'+j.error;return}
+ if(!j.configured){$('msg').textContent='未設定 BingX 唯讀 key（環境變數 BINGX_API_KEY / BINGX_API_SECRET）';return}
+ series.setMarkers(j.fills.filter(f=>f.filled_at_ms&&f.price).map(f=>({time:Math.floor(f.filled_at_ms/1000),position:f.side==='buy'?'belowBar':'aboveBar',color:f.side==='buy'?'#22d3a5':'#ff5b7f',shape:f.side==='buy'?'arrowUp':'arrowDown',text:String(f.price)})));
+ $('msg').textContent=`近 7 天成交 ${j.fills.length} 筆（唯讀）`};
+$('chk').onclick=async()=>{const r=await fetch('/api/match?plan=latest');const j=await r.json();
+ if(j.error){$('msg').textContent='失敗：'+j.error;return}
+ if(j.status==='closed'||j.status==='open'){const p=j.plan;$('msg').textContent=`${j.status==='closed'?'已平倉':'持倉中'}：實際進場 ${j.provider_entry_price.toFixed(2)}，計畫RR ${p.planned_rr}`+(p.realized_r!==undefined?`，實現 ${p.realized_r}R`:'')}
+ else $('msg').textContent='核對結果：'+j.status+(j.reason?'（'+j.reason+'）':'')+(j.hint?'　'+j.hint:'')};
+$('sym').onchange=$('iv').onchange=load;load();
+</script></body></html>

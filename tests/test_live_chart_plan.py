@@ -74,3 +74,38 @@ def test_actual_fill_not_chart_entry_sets_one_r_and_rr_once_filled():
     # A fill that is already through the chart stop has no valid risk.
     with pytest.raises(LiveChartPlanError, match="contradict"):
         derive_live_chart_plan(_chart(100, 98, 106), direction="long", provider_entry_price=97)
+
+
+# --- app_drawn (Allen, 2026-11-23): additive; screenshot provenance above is unchanged ---
+def _drawn(entry, stop, target, ref="plan:1700000000-BTC-USDT"):
+    c = _chart(entry, stop, target, provenance="app_drawn")
+    for v in c.values():
+        v["evidence_ref"] = ref
+    c["plan_created_at"] = 1700000000
+    return c
+
+
+def test_app_drawn_plan_saved_before_entry_gives_same_r_as_a_screenshot():
+    drawn = derive_live_chart_plan(_drawn(100, 98, 106), direction="long",
+                                   provider_entry_price=100, provider_exit_price=104,
+                                   provider_entry_time=1700000500)
+    shot = derive_live_chart_plan(_chart(100, 98, 106), direction="long",
+                                  provider_entry_price=100, provider_exit_price=104)
+    assert drawn["planned_rr"] == shot["planned_rr"] == 3.0
+    assert drawn["realized_r"] == shot["realized_r"] == 2.0
+    assert drawn["chart_price_evidence"]["stop"]["provenance"] == "app_drawn"
+
+
+@pytest.mark.parametrize("created,entry_t", [(1700000500, 1700000500), (1700000900, 1700000500), (1700000000, None)])
+def test_app_drawn_rejected_unless_provably_before_entry(created, entry_t):
+    chart = _drawn(100, 98, 106)
+    chart["plan_created_at"] = created
+    with pytest.raises(LiveChartPlanError):
+        derive_live_chart_plan(chart, direction="long", provider_entry_time=entry_t)
+
+
+def test_app_drawn_needs_a_plan_ref_and_screenshots_still_need_attached_images():
+    with pytest.raises(LiveChartPlanError):
+        derive_live_chart_plan(_drawn(100, 98, 106, ref=REF), direction="long", provider_entry_time=1700000500)
+    with pytest.raises(LiveChartPlanError):  # old rule intact: unattached image ref still rejected
+        derive_live_chart_plan(_chart(100, 98, 106), direction="long", attached_refs={"other"})
